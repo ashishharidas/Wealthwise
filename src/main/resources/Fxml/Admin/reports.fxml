@@ -1,14 +1,56 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import java.lang.*?>
-<?import java.util.*?>
-<?import javafx.scene.*?>
+<?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Text?>
 
-<AnchorPane xmlns="http://javafx.com/javafx"
-            xmlns:fx="http://javafx.com/fxml"
-            fx:controller="com.smartfinance.Controller.Admin.reportAdminController"
-            prefHeight="400.0" prefWidth="600.0">
-
+<AnchorPane prefHeight="750.0" prefWidth="850.0" styleClass="report_container" stylesheets="@../../Styles/Report.css" xmlns="http://javafx.com/javafx/24.0.1" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.smartfinance.Controller.Admin.reportAdminController">
+   <children>
+      <VBox layoutX="50.0" layoutY="30.0" prefHeight="690.0" prefWidth="750.0" spacing="20.0">
+         <children>
+            <Text strokeType="OUTSIDE" strokeWidth="0.0" text="Client Reports &amp; Issues" styleClass="report-title" />
+            
+            <HBox spacing="20.0">
+               <children>
+                  <Button fx:id="all_reports_btn" mnemonicParsing="false" onAction="#onAllReports" prefWidth="150.0" text="Issue Reports" />
+                  <Button fx:id="generated_reports_btn" mnemonicParsing="false" onAction="#onGeneratedReports" prefWidth="180.0" text="Financial Reports" />
+                  <Button fx:id="client_reports_btn" mnemonicParsing="false" onAction="#onClientReports" prefWidth="150.0" text="Client Statistics" />
+                  <Button fx:id="refresh_btn" mnemonicParsing="false" onAction="#onRefresh" prefWidth="100.0" text="Refresh" />
+               </children>
+            </HBox>
+            
+            <TableView fx:id="reports_table" prefHeight="400.0" prefWidth="750.0">
+               <columns>
+                  <TableColumn fx:id="id_col" prefWidth="50.0" text="ID" />
+                  <TableColumn fx:id="client_col" prefWidth="150.0" text="Client" />
+                  <TableColumn fx:id="issue_type_col" prefWidth="120.0" text="Issue Type" />
+                  <TableColumn fx:id="description_col" prefWidth="200.0" text="Description" />
+                  <TableColumn fx:id="date_col" prefWidth="130.0" text="Date" />
+                  <TableColumn fx:id="status_col" prefWidth="100.0" text="Status" />
+               </columns>
+            </TableView>
+            
+            <HBox spacing="15.0" alignment="CENTER_LEFT">
+               <children>
+                  <Label text="Change Status:" />
+                  <ComboBox fx:id="status_combo" prefWidth="150.0" promptText="Select Status" />
+                  <Button fx:id="update_status_btn" mnemonicParsing="false" onAction="#onUpdateStatus" text="Update Status" />
+                  <Label fx:id="status_message_label" text="" styleClass="status-message" />
+               </children>
+            </HBox>
+            
+            <HBox spacing="10.0" alignment="CENTER_LEFT">
+               <children>
+                  <Label text="Total Reports:" />
+                  <Label fx:id="total_reports_label" text="0" styleClass="report-count" />
+                  <Label text="  |  Open:" />
+                  <Label fx:id="open_reports_label" text="0" styleClass="report-count" />
+                  <Label text="  |  Fixed:" />
+                  <Label fx:id="fixed_reports_label" text="0" styleClass="report-count" />
+               </children>
+            </HBox>
+         </children>
+      </VBox>
+   </children>
 </AnchorPane>

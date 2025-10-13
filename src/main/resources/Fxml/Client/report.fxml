@@ -1,24 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import java.lang.*?>
-<?import java.util.*?>
-<?import javafx.scene.*?>
+<?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Text?>
 
 <AnchorPane prefHeight="750.0" prefWidth="850.0" styleClass="report_container" stylesheets="@../../Styles/Report.css" xmlns="http://javafx.com/javafx/24.0.1" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.smartfinance.Controller.Client.reportController">
    <children>
-      <Text layoutX="350.0" layoutY="38.0" strokeType="OUTSIDE" strokeWidth="0.0" text="Financial Reports" />
-      <VBox layoutX="50.0" layoutY="60.0" prefHeight="650.0" prefWidth="750.0" spacing="20.0">
+      <VBox layoutX="50.0" layoutY="30.0" prefHeight="690.0" prefWidth="750.0" spacing="20.0">
          <children>
-            <HBox spacing="20.0">
+            <Text strokeType="OUTSIDE" strokeWidth="0.0" text="Reports &amp; Feedback" styleClass="report-title" />
+            
+            <!-- Financial Reports Section -->
+            <VBox spacing="10.0">
                <children>
-                  <Button fx:id="transaction_report_btn" mnemonicParsing="false" onAction="#onTransactionReport" prefWidth="200.0" text="Transaction Report" />
-                  <Button fx:id="investment_report_btn" mnemonicParsing="false" onAction="#onInvestmentReport" prefWidth="200.0" text="Investment Report" />
-                  <Button fx:id="balance_report_btn" mnemonicParsing="false" onAction="#onBalanceReport" prefWidth="200.0" text="Balance Summary" />
+                  <Label text="Financial Reports" style="-fx-font-size: 16px; -fx-font-weight: bold;" />
+                  <HBox spacing="20.0">
+                     <children>
+                        <Button fx:id="transaction_report_btn" mnemonicParsing="false" onAction="#onTransactionReport" prefWidth="200.0" text="Transaction Report" />
+                        <Button fx:id="investment_report_btn" mnemonicParsing="false" onAction="#onInvestmentReport" prefWidth="200.0" text="Investment Report" />
+                        <Button fx:id="balance_report_btn" mnemonicParsing="false" onAction="#onBalanceReport" prefWidth="200.0" text="Balance Summary" />
+                     </children>
+                  </HBox>
+                  <TextArea fx:id="report_textarea" prefHeight="250.0" prefWidth="750.0" wrapText="true" editable="false" />
                </children>
-            </HBox>
-            <TextArea fx:id="report_textarea" prefHeight="550.0" prefWidth="750.0" wrapText="true" />
+            </VBox>
+            
+            <Separator />
+            
+            <!-- Report Issue Section -->
+            <VBox spacing="10.0">
+               <children>
+                  <Label text="Report an Issue or Negative Experience" style="-fx-font-size: 16px; -fx-font-weight: bold;" />
+                  <HBox spacing="10.0" alignment="CENTER_LEFT">
+                     <children>
+                        <Label text="Issue Type:" prefWidth="100.0" />
+                        <ComboBox fx:id="issue_type_combo" prefWidth="200.0" promptText="Select issue type" />
+                     </children>
+                  </HBox>
+                  <VBox spacing="5.0">
+                     <children>
+                        <Label text="Description:" />
+                        <TextArea fx:id="issue_description_textarea" prefHeight="150.0" prefWidth="750.0" wrapText="true" promptText="Please describe the issue or negative experience you encountered..." />
+                     </children>
+                  </VBox>
+                  <HBox spacing="10.0">
+                     <children>
+                        <Button fx:id="submit_issue_btn" mnemonicParsing="false" onAction="#onSubmitIssue" prefWidth="150.0" text="Submit Issue" />
+                        <Button fx:id="view_my_reports_btn" mnemonicParsing="false" onAction="#onViewMyReports" prefWidth="150.0" text="View My Reports" />
+                        <Label fx:id="submit_status_label" text="" style="-fx-text-fill: green;" />
+                     </children>
+                  </HBox>
+               </children>
+            </VBox>
          </children>
       </VBox>
    </children>

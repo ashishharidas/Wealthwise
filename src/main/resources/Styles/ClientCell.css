@@ -1,7 +1,7 @@
 
 .client_cell_container{
 -fx-background-color: linear-gradient(to right, #8bdcf0, #104950);
--fx-drop-shadow: 2px 2px 5px rgba(46, 68, 78, 0.1);
+-fx-effect: dropshadow(gaussian, rgba(46, 68, 78, 0.1), 5, 0, 2, 2);
 
 
 
@@ -12,7 +12,7 @@
     -fx-background-color: #d1e7dd;
     -fx-border-radius: 50%;
     -fx-background-radius: 50%;
-    -fx-drop-shadow: 2px 2px 5px rgba(0,0,0,0);
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0), 5, 0, 2, 2);
 }
 .client_cell_container_Hbox{
     -fx-spacing: 10;

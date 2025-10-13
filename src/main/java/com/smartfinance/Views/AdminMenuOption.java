@@ -3,7 +3,7 @@ package com.smartfinance.Views;
 public enum AdminMenuOption {
     CREATE_CLIENT,
     CLIENTS,
-    DEPOSIT,
+    REPORTS,
     LOGOUT;
 
 

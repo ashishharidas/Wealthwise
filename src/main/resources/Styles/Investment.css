@@ -1,7 +1,7 @@
 /* Investment View Styles */
 
 .investment_container {
-    -fx-background-color: #f8f9fa;
+    -fx-background-color: linear-gradient(to bottom right, #99e1eb, #d9e2ec);
     -fx-padding: 20px;
 }
 
@@ -18,7 +18,7 @@
 }
 
 .investment_container ChoiceBox {
-    -fx-background-color: #ffffff;
+    -fx-background-color: linear-gradient(to bottom right, #ffffff, #7dd7ed);
     -fx-border-color: #bdc3c7;
     -fx-border-radius: 5px;
     -fx-background-radius: 5px;
@@ -48,7 +48,7 @@
 }
 
 .investment_container ListView {
-    -fx-background-color: #ffffff;
+    -fx-background-color: linear-gradient(to bottom right, #d9e2ec,#72deed);
     -fx-border-color: #bdc3c7;
     -fx-border-radius: 5px;
     -fx-background-radius: 5px;
@@ -56,12 +56,12 @@
 
 .investment_container ListView .list-cell {
     -fx-padding: 10px;
-    -fx-border-color: #ecf0f1;
+    -fx-border-color: #0b0b0b;
     -fx-border-width: 0 0 1 0;
 }
 
 .investment_container ListView .list-cell:hover {
-    -fx-background-color: #ecf0f1;
+    -fx-background-color: #bfe3ec;
 }
 
 /* ScrollPane for recommendations */

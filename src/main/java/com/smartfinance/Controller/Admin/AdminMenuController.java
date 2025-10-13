@@ -17,7 +17,7 @@ public class AdminMenuController implements Initializable{
     public Button client_btn;
     
     @FXML
-    public Button deposit_btn;
+    public Button report_btn;
     
     @FXML
     public Button logout_btn;
@@ -30,7 +30,7 @@ public class AdminMenuController implements Initializable{
     private void addListeners(){
         create_client.setOnAction(event -> onCreateClient());
         client_btn.setOnAction(event -> onClients());
-        deposit_btn.setOnAction(event -> onDeposit());
+        report_btn.setOnAction(event -> onReports());
         logout_btn.setOnAction(event -> onLogout());
     }
 
@@ -42,8 +42,8 @@ public class AdminMenuController implements Initializable{
         Model.getInstance().getViewFactory().getAdminSelectedMenuItem().set(AdminMenuOption.CLIENTS);
     }
 
-    private void onDeposit(){
-        Model.getInstance().getViewFactory().getAdminSelectedMenuItem().set(AdminMenuOption.DEPOSIT);
+    private void onReports(){
+        Model.getInstance().getViewFactory().getAdminSelectedMenuItem().set(AdminMenuOption.REPORTS);
     }
 
     private void onLogout(){

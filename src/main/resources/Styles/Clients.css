@@ -1,5 +1,5 @@
 .clients_container{
-    -fx-background-color: linear-gradient(to bottom right, #3a8ca8, #f1f1f1,);
+    -fx-background-color: linear-gradient(to bottom right, #3a8ca8, #f1f1f1);
     -fx-alignment: center;
 }
 

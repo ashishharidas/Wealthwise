@@ -21,7 +21,11 @@ public class ClientCellController implements Initializable {
     @FXML
     private Label sav_balance;
     @FXML
+    private Label sav_acc_number;
+    @FXML
     private Label wallet_balance;
+    @FXML
+    private Label wallet_acc_number;
     @FXML
     private Button delete_btn;
 
@@ -38,9 +42,18 @@ public class ClientCellController implements Initializable {
         pAddress_lbl.setText(client.getPayeeAddress());
         if (client.getSavingsAccount() != null) {
             sav_balance.setText("₹" + String.format("%.2f", client.getSavingsAccount().getBalance()));
+            sav_acc_number.setText(client.getSavingsAccount().getAccNumber());
+        } else {
+            sav_balance.setText("—");
+            sav_acc_number.setText("—");
         }
+
         if (client.getWalletAccount() != null) {
             wallet_balance.setText("₹" + String.format("%.2f", client.getWalletAccount().getBalance()));
+            wallet_acc_number.setText(client.getWalletAccount().getAccNumber());
+        } else {
+            wallet_balance.setText("—");
+            wallet_acc_number.setText("—");
         }
 
         delete_btn.setOnAction(event -> {

@@ -49,16 +49,16 @@ public class profileController implements Initializable {
         String payeeAddress = client.getPayeeAddress();
         try (ResultSet wallet = db.getWalletAccount(payeeAddress)) {
             if (wallet != null && wallet.next()) {
-                wallet_acc_num_lbl.setText(wallet.getString("AccNumber"));
-                wallet_balance_lbl.setText("$" + String.format("%.2f", wallet.getDouble("Balance")));
+                wallet_acc_num_lbl.setText(wallet.getString("AccountNumber"));
+                wallet_balance_lbl.setText("₹" + String.format("%.2f", wallet.getDouble("Balance")));
             }
         } catch (SQLException e) {
             e.printStackTrace();
         }
         try (ResultSet savings = db.getSavingsAccount(payeeAddress)) {
             if (savings != null && savings.next()) {
-                savings_acc_num_lbl.setText(savings.getString("AccNumber"));
-                savings_balance_lbl.setText("$" + String.format("%.2f", savings.getDouble("Balance")));
+                savings_acc_num_lbl.setText(savings.getString("AccountNumber"));
+                savings_balance_lbl.setText("₹" + String.format("%.2f", savings.getDouble("Balance")));
             }
         } catch (SQLException e) {
             e.printStackTrace();

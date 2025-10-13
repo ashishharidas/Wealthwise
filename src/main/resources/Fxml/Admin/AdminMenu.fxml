@@ -38,14 +38,15 @@
                         </image>
                      </ImageView>
                   </graphic></Button>
-                  <Button fx:id="deposit_btn" layoutX="10.0" layoutY="36.0" mnemonicParsing="false" prefHeight="30.0" prefWidth="90.0" text="Deposit">
+               <Button fx:id="report_btn" layoutX="34.0" layoutY="154.0" mnemonicParsing="false" prefHeight="30.0" prefWidth="90.0" text="Reports">
                   <graphic>
                      <ImageView fitHeight="21.0" fitWidth="21.0">
                         <image>
-                           <Image url="@../../Images/wallet.png" />
+                           <Image url="@../../Images/list.png" />
                         </image>
                      </ImageView>
-                  </graphic></Button>
+                  </graphic>
+               </Button>
                   <Button fx:id="logout_btn" layoutX="10.0" layoutY="36.0" mnemonicParsing="false" prefHeight="30.0" prefWidth="90.0" text="Logout">
                   <graphic>
                      <ImageView fitHeight="21.0" fitWidth="21.0">

@@ -14,9 +14,6 @@ public class DatabaseDriver {
         try {
             this.connection = DriverManager.getConnection("jdbc:sqlite:mazebank.db");
             System.out.println("[DatabaseDriver] ✅ Connected to database successfully.");
-            try (Statement stmt = connection.createStatement()) {
-                stmt.execute("PRAGMA foreign_keys = ON");
-            }
             ensureTablesExist();
         } catch (SQLException e) {
             System.err.println("[DatabaseDriver] ❌ Connection failed!");
@@ -59,9 +56,8 @@ public class DatabaseDriver {
                     Owner TEXT,
                     AccountNumber TEXT,
                     Balance REAL,
-                    TransactionLimit REAL,
-                    date_created TEXT,
-                    FOREIGN KEY (Owner) REFERENCES Clients(PayeeAddress) ON DELETE CASCADE
+                    DepositLimit REAL,
+                    Date TEXT
                 )
             """);
 
@@ -72,8 +68,7 @@ public class DatabaseDriver {
                     AccountNumber TEXT,
                     Balance REAL,
                     TransactionLimit REAL,
-                    date_created TEXT,
-                    FOREIGN KEY (Owner) REFERENCES Clients(PayeeAddress) ON DELETE CASCADE
+                    date_created TEXT
                 )
             """);
 
@@ -96,8 +91,30 @@ public class DatabaseDriver {
                     InvestmentType TEXT,
                     AmountInvested REAL,
                     CurrentValue REAL,
-                    DateInvested TEXT,
-                    FOREIGN KEY (Owner) REFERENCES Clients(PayeeAddress) ON DELETE CASCADE
+                    DateInvested TEXT
+                )
+            """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS ClientReports (
+                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ClientName TEXT,
+                    PayeeAddress TEXT,
+                    IssueType TEXT,
+                    Description TEXT,
+                    DateReported TEXT,
+                    Status TEXT DEFAULT 'Open'
+                )
+            """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS GeneratedReports (
+                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ClientName TEXT,
+                    PayeeAddress TEXT,
+                    ReportType TEXT,
+                    ReportContent TEXT,
+                    DateGenerated TEXT
                 )
             """);
 
@@ -144,12 +161,13 @@ public class DatabaseDriver {
              ResultSet rs = stmt.executeQuery("SELECT MAX(ID) FROM " + table)) {
             if (rs.next()) {
                 int next = rs.getInt(1) + 1;
-                return String.format("%04d", next);
+                // Format: 3201 XXXX (3201 is fixed, XXXX is unique 4-digit number)
+                return String.format("3201 %04d", next);
             }
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        return "0001";
+        return "3201 0001";
     }
 
     public void createWalletAccount(String owner, double balance) {
@@ -173,28 +191,102 @@ public class DatabaseDriver {
     // ====================================================
     // CLIENT MANAGEMENT
     // ====================================================
+    /**
+     * Creates a new client with associated wallet and savings accounts.
+     * This operation is atomic - either all records are created or none.
+     * 
+     * @param firstName Client's first name
+     * @param lastName Client's last name
+     * @param payeeAddress Unique payee address (used as client identifier)
+     * @param password Client's password
+     * @param walletBalance Initial wallet account balance
+     * @param savingsBalance Initial savings account balance
+     * @return true if client was created successfully, false otherwise
+     */
     public boolean createClient(String firstName, String lastName, String payeeAddress, String password,
-                                double savingsBalance, double walletBalance) {
+                                double walletBalance, double savingsBalance) {
+        // Input validation
+        if (firstName == null || firstName.trim().isEmpty()) {
+            System.err.println("[createClient] ❌ First name cannot be empty");
+            return false;
+        }
+        if (lastName == null || lastName.trim().isEmpty()) {
+            System.err.println("[createClient] ❌ Last name cannot be empty");
+            return false;
+        }
+        if (payeeAddress == null || payeeAddress.trim().isEmpty()) {
+            System.err.println("[createClient] ❌ Payee address cannot be empty");
+            return false;
+        }
+        if (password == null || password.trim().isEmpty()) {
+            System.err.println("[createClient] ❌ Password cannot be empty");
+            return false;
+        }
+        if (walletBalance < 0 || savingsBalance < 0) {
+            System.err.println("[createClient] ❌ Initial balances cannot be negative");
+            return false;
+        }
+
+        // Check if client already exists
+        try (ResultSet rs = executeQuery("SELECT PayeeAddress FROM Clients WHERE PayeeAddress = ?", payeeAddress)) {
+            if (rs != null && rs.next()) {
+                System.err.println("[createClient] ❌ Client with payee address '" + payeeAddress + "' already exists");
+                return false;
+            }
+        } catch (SQLException e) {
+            System.err.println("[createClient] ❌ Error checking for existing client");
+            e.printStackTrace();
+            return false;
+        }
+
         LocalDate date = LocalDate.now();
+        
         try {
             connection.setAutoCommit(false);
+            System.out.println("[createClient] 🔄 Creating client: " + firstName + " " + lastName + " (" + payeeAddress + ")");
 
-            executeUpdate(
+            // Step 1: Create client record
+            int clientRows = executeUpdate(
                     "INSERT INTO Clients (FirstName, LastName, PayeeAddress, Password, Date) VALUES (?, ?, ?, ?, ?)",
                     firstName, lastName, payeeAddress, password, date.toString()
             );
+            
+            if (clientRows == 0) {
+                throw new SQLException("Failed to insert client record");
+            }
+            System.out.println("[createClient] ✅ Client record created");
 
+            // Step 2: Create wallet account
             createWalletAccount(payeeAddress, walletBalance);
-            createSavingsAccount(payeeAddress, savingsBalance);
+            System.out.println("[createClient] ✅ Wallet account created (Balance: $" + walletBalance + ")");
 
+            // Step 3: Create savings account
+            createSavingsAccount(payeeAddress, savingsBalance);
+            System.out.println("[createClient] ✅ Savings account created (Balance: $" + savingsBalance + ")");
+
+            // Commit transaction
             connection.commit();
+            System.out.println("[createClient] ✅ Client creation completed successfully");
             return true;
+            
         } catch (SQLException e) {
-            try { connection.rollback(); } catch (SQLException ignored) {}
+            System.err.println("[createClient] ❌ Error during client creation - rolling back transaction");
+            try { 
+                connection.rollback();
+                System.err.println("[createClient] ↩️ Transaction rolled back successfully");
+            } catch (SQLException rollbackEx) {
+                System.err.println("[createClient] ❌ Failed to rollback transaction");
+                rollbackEx.printStackTrace();
+            }
             e.printStackTrace();
             return false;
         } finally {
-            try { connection.setAutoCommit(true); } catch (SQLException ignored) {}
+            try { 
+                connection.setAutoCommit(true); 
+            } catch (SQLException e) {
+                System.err.println("[createClient] ⚠️ Failed to reset auto-commit");
+                e.printStackTrace();
+            }
         }
     }
 
@@ -293,6 +385,63 @@ public class DatabaseDriver {
     public boolean updateBalance(String table, String owner, double newBalance) {
         String sql = "UPDATE " + table + " SET Balance = ? WHERE Owner = ?";
         return executeUpdate(sql, newBalance, owner) > 0;
+    }
+
+    // ====================================================
+    // CLIENT REPORTS
+    // ====================================================
+    public void createClientReport(String clientName, String payeeAddress, String issueType, String description) {
+        executeUpdate(
+                "INSERT INTO ClientReports (ClientName, PayeeAddress, IssueType, Description, DateReported, Status) VALUES (?, ?, ?, ?, datetime('now'), 'Open')",
+                clientName, payeeAddress, issueType, description
+        );
+    }
+
+    public ResultSet getAllClientReports() {
+        return executeQuery("SELECT * FROM ClientReports ORDER BY DateReported DESC");
+    }
+
+    public ResultSet getClientReportsByPayee(String payeeAddress) {
+        return executeQuery(
+                "SELECT * FROM ClientReports WHERE PayeeAddress = ? ORDER BY DateReported DESC",
+                payeeAddress
+        );
+    }
+
+    public boolean updateReportStatus(int reportId, String status) {
+        return executeUpdate("UPDATE ClientReports SET Status = ? WHERE ID = ?", status, reportId) > 0;
+    }
+
+    public ResultSet getAllClients() {
+        return executeQuery("SELECT * FROM Clients ORDER BY Date DESC");
+    }
+
+    // ====================================================
+    // GENERATED REPORTS
+    // ====================================================
+    public void createGeneratedReport(String clientName, String payeeAddress, String reportType, String reportContent) {
+        executeUpdate(
+                "INSERT INTO GeneratedReports (ClientName, PayeeAddress, ReportType, ReportContent, DateGenerated) VALUES (?, ?, ?, ?, datetime('now'))",
+                clientName, payeeAddress, reportType, reportContent
+        );
+    }
+
+    public ResultSet getAllGeneratedReports() {
+        return executeQuery("SELECT * FROM GeneratedReports ORDER BY DateGenerated DESC");
+    }
+
+    public ResultSet getGeneratedReportsByPayee(String payeeAddress) {
+        return executeQuery(
+                "SELECT * FROM GeneratedReports WHERE PayeeAddress = ? ORDER BY DateGenerated DESC",
+                payeeAddress
+        );
+    }
+
+    public ResultSet getGeneratedReportsByType(String reportType) {
+        return executeQuery(
+                "SELECT * FROM GeneratedReports WHERE ReportType = ? ORDER BY DateGenerated DESC",
+                reportType
+        );
     }
 
     // ====================================================

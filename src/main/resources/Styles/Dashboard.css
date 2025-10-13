@@ -56,7 +56,7 @@
     fill: #8ac7cc;
 }
 .account_ckecking_saving{
-    -fx-background-color: linear-gradient(to rigth, #245c73, #3a8ca8);
+    -fx-background-color: linear-gradient(to right, #245c73, #3a8ca8);
 }
 .account_balance{
     -fx-text-fill:#ffffff;

@@ -29,7 +29,7 @@ public class ViewFactory {
     private final ObjectProperty<AdminMenuOption> adminSelectedMenuItem ;
     private AnchorPane createClientView;
     private AnchorPane clientsView;
-    private AnchorPane depositView;
+    private AnchorPane reportsView;
     private AnchorPane LogoutAdminView;
 
 
@@ -191,19 +191,19 @@ public class ViewFactory {
         }
         return clientsView;
     }
-    public AnchorPane getDepositView(){
-        if(depositView==null){
+    
+    public AnchorPane getReportsView(){
+        if(reportsView==null){
             try{
-                depositView=new FXMLLoader(getClass().getResource("/Fxml/Admin/deposit.fxml")).load();
+                reportsView=new FXMLLoader(getClass().getResource("/Fxml/Admin/reports.fxml")).load();
             }catch(Exception e){
-                System.err.println("Error loading deposit.fxml: " + e.getMessage());
+                System.err.println("Error loading reports.fxml: " + e.getMessage());
                 e.printStackTrace();
-                // Return an empty AnchorPane if FXML fails to load
-                depositView = new AnchorPane();
             }
         }
-        return depositView;
+        return reportsView;
     }
+    
      public AnchorPane getLogoutAdminView(){
          if(LogoutAdminView==null){
              try{

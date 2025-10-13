@@ -21,10 +21,9 @@ public class CreateClientController implements Initializable {
     @FXML
     private TextField payee_address;
     @FXML
-
     private TextField wallet_balance;
     @FXML
-    private TextField savings_balance;
+    private TextField account_balance;
     @FXML
     private Button create_client_button;
     @FXML
@@ -47,7 +46,7 @@ public class CreateClientController implements Initializable {
 
         try {
             walletbalance = Double.parseDouble(wallet_balance.getText().trim());
-            savingsbalance = Double.parseDouble(savings_balance.getText().trim());
+            savingsbalance = Double.parseDouble(account_balance.getText().trim());
         } catch (NumberFormatException e) {
             error_lbl.setText("⚠ Please enter valid numbers for Wallet and Savings balance");
             return;
@@ -76,6 +75,6 @@ public class CreateClientController implements Initializable {
         payee_address.clear();
         password.clear();
         wallet_balance.clear();
-        savings_balance.clear();
+        account_balance.clear();
     }
 }
