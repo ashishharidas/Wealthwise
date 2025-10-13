@@ -73,7 +73,8 @@ public class profileController implements Initializable {
             while (rs != null && rs.next()) {
                 String category = rs.getString("Category");
                 double total = rs.getDouble("Total");
-                expenditure_pie_chart.getData().add(new PieChart.Data(category, total));
+                String label = category + " (₹" + String.format("%.2f", total) + ")";
+                expenditure_pie_chart.getData().add(new PieChart.Data(label, total));
             }
         } catch (SQLException e) {
             e.printStackTrace();

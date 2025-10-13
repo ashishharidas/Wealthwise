@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 // Forcing a file update
@@ -25,9 +26,14 @@ public class Model {
     private Consumer<Client> clientDeletedListener;
     private Runnable onClientDataRefreshed;
 
+    private ObservableList<Budget> budgetLimitCache;
+    private ObservableList<String> budgetCategories;
+
     private Model() {
         this.viewFactory = new ViewFactory();
         this.databaseDriver = new DatabaseDriver();
+        this.budgetLimitCache = FXCollections.observableArrayList();
+        this.budgetCategories = FXCollections.observableArrayList();
     }
 
     public static synchronized Model getInstance() {
@@ -37,6 +43,14 @@ public class Model {
 
     public ViewFactory getViewFactory() { return viewFactory; }
     public DatabaseDriver getDatabaseDriver() { return databaseDriver; }
+
+    public ObservableList<Budget> getBudgets() {
+        return budgetLimitCache;
+    }
+
+    public ObservableList<String> getBudgetCategories() {
+        return budgetCategories;
+    }
 
     // =====================================================
     // ACCOUNT LOADERS (auto-fetched from DB)
@@ -91,7 +105,10 @@ public class Model {
             SavingsAccount savings = getSavingsAccount(payeeAddress);
             Client newClient = new Client(firstName, lastName, payeeAddress, wallet, savings, date);
             newClient.setTransactionHistory(loadClientTransactions(payeeAddress));
+            loadBudgetsForClient(payeeAddress);
             clientCreatedListener.accept(newClient);
+        } else {
+            loadBudgetsForClient(payeeAddress);
         }
         return true;
     }
@@ -127,10 +144,16 @@ public class Model {
 
                 loggedInClient = new Client(fName, lName, pAddress, wallet, savings, date);
                 loggedInClient.setTransactionHistory(loadClientTransactions(pAddress));
+                loadBudgetsForClient(pAddress);
+                loadBudgetCategoriesForClient(pAddress);
+            } else {
+                budgetLimitCache.clear();
+                budgetCategories.clear();
             }
         } catch (SQLException e) {
             e.printStackTrace();
             clientLoginSuccessFlag = false;
+            budgetLimitCache.clear();
         }
     }
 
@@ -192,6 +215,11 @@ public class Model {
     // TRANSACTIONS
     // =====================================================
     public boolean transferMoney(String senderAddress, String receiverAddress, double amount, String category, String message) {
+        // Prevent self-transfer
+        if (senderAddress != null && senderAddress.equalsIgnoreCase(receiverAddress)) {
+            return false;
+        }
+        
         DatabaseDriver db = getDatabaseDriver();
         try {
             db.getConnection().setAutoCommit(false);
@@ -257,6 +285,83 @@ public class Model {
         return list;
     }
 
+    public void loadBudgetsForClient(String owner) {
+        loadBudgetsForClient(owner, true);
+    }
+
+    public void loadBudgetsForClient(String owner, boolean synchronizeSpent) {
+        budgetLimitCache.clear();
+        try (ResultSet rs = databaseDriver.getBudgetsForOwner(owner)) {
+            while (rs != null && rs.next()) {
+                String category = rs.getString("Category");
+                double recordedSpent = rs.getDouble("BudgetSpent");
+
+                if (synchronizeSpent) {
+                    double currentSpent = databaseDriver.getSpentAmountForCurrentMonth(owner, category);
+                    if (Double.compare(currentSpent, recordedSpent) != 0) {
+                        databaseDriver.updateBudgetSpent(owner, category, currentSpent);
+                        recordedSpent = currentSpent;
+                    }
+                }
+
+                budgetLimitCache.add(new Budget(
+                        rs.getString("Owner"),
+                        category,
+                        rs.getDouble("BudgetAmount"),
+                        recordedSpent,
+                        rs.getString("CreationDate")
+                ));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void loadBudgetCategoriesForClient(String owner) {
+        budgetCategories.setAll(databaseDriver.getDistinctBudgetCategories(owner));
+    }
+
+    public boolean saveBudget(String owner, String category, double amount) {
+        boolean result = databaseDriver.createOrUpdateBudget(owner, category, amount, 0.0);
+        if (result) {
+            loadBudgetsForClient(owner);
+            loadBudgetCategoriesForClient(owner);
+        }
+        return result;
+    }
+
+    public boolean deleteBudget(String owner, String category) {
+        boolean result = databaseDriver.deleteBudget(owner, category);
+        if (result) {
+            loadBudgetsForClient(owner);
+            loadBudgetCategoriesForClient(owner);
+        }
+        return result;
+    }
+
+    public Optional<Budget> findBudget(String category) {
+        return budgetLimitCache.stream()
+                .filter(b -> b.getCategory().equalsIgnoreCase(category))
+                .findFirst();
+    }
+
+    public double getRemainingBudgetForCurrentMonth(String owner, String category) {
+        Double limit = databaseDriver.getBudgetLimit(owner, category);
+        if (limit == null) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        double spentThisMonth = databaseDriver.getSpentAmountForCurrentMonth(owner, category);
+        databaseDriver.updateBudgetSpent(owner, category, spentThisMonth);
+
+        double remaining = limit - spentThisMonth;
+        return remaining;
+    }
+
+    public double getBudgetSpentForCurrentMonth(String owner, String category) {
+        return databaseDriver.getSpentAmountForCurrentMonth(owner, category);
+    }
+
     // =====================================================
     // DASHBOARD REFRESH
     // =====================================================
@@ -266,8 +371,16 @@ public class Model {
             loggedInClient.walletAccountProperty().set(getWalletAccount(payee));
             loggedInClient.savingsAccountProperty().set(getSavingsAccount(payee));
             loggedInClient.setTransactionHistory(loadClientTransactions(payee));
+            loadBudgetsForClient(payee);
+            loadBudgetCategoriesForClient(payee);
 
             if (onClientDataRefreshed != null) onClientDataRefreshed.run();
+        }
+    }
+
+    public void notifyClientDataRefreshed() {
+        if (onClientDataRefreshed != null) {
+            onClientDataRefreshed.run();
         }
     }
 }

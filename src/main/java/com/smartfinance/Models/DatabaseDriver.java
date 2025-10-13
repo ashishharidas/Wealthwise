@@ -2,6 +2,8 @@ package com.smartfinance.Models;
 
 import java.sql.*;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * DatabaseDriver - Handles all DB operations for Smart Finance app.
@@ -82,6 +84,21 @@ public class DatabaseDriver {
                     Message TEXT,
                     Date TEXT
                 )
+            """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS Budgets (
+                    Owner TEXT NOT NULL,
+                    Category TEXT NOT NULL,
+                    BudgetAmount REAL NOT NULL,
+                    BudgetSpent REAL NOT NULL DEFAULT 0.0,
+                    CreationDate TEXT NOT NULL
+                )
+            """);
+
+            stmt.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_owner_category
+                ON Budgets (Owner, Category)
             """);
 
             stmt.execute("""
@@ -342,6 +359,90 @@ public class DatabaseDriver {
         return executeQuery(
                 "SELECT Category, SUM(Amount) as Total FROM Transactions WHERE Sender = ? GROUP BY Category",
                 payeeAddress
+        );
+    }
+
+    // ====================================================
+    // BUDGETS
+    // ====================================================
+    public ResultSet getBudgetsForOwner(String owner) {
+        return executeQuery("SELECT * FROM Budgets WHERE Owner = ? ORDER BY Category", owner);
+    }
+
+    public List<String> getDistinctBudgetCategories(String owner) {
+        List<String> categories = new ArrayList<>();
+        try (ResultSet rs = executeQuery("SELECT DISTINCT Category FROM Budgets WHERE Owner = ? ORDER BY Category", owner)) {
+            while (rs != null && rs.next()) {
+                String category = rs.getString("Category");
+                if (category != null) {
+                    categories.add(category);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return categories;
+    }
+
+    public boolean createOrUpdateBudget(String owner, String category, double amount, double spent) {
+        String creationDate = LocalDate.now().toString();
+        int affected = executeUpdate(
+                "INSERT INTO Budgets (Owner, Category, BudgetAmount, BudgetSpent, CreationDate) VALUES (?, ?, ?, ?, ?) " +
+                        "ON CONFLICT(Owner, Category) DO UPDATE SET " +
+                        "BudgetAmount = excluded.BudgetAmount, " +
+                        "BudgetSpent = CASE WHEN Budgets.CreationDate = excluded.CreationDate " +
+                        "THEN Budgets.BudgetSpent + excluded.BudgetSpent ELSE excluded.BudgetSpent END, " +
+                        "CreationDate = excluded.CreationDate",
+                owner, category, amount, spent, creationDate
+        );
+        return affected > 0;
+    }
+
+    public boolean deleteBudget(String owner, String category) {
+        return executeUpdate("DELETE FROM Budgets WHERE Owner = ? AND Category = ?", owner, category) > 0;
+    }
+
+    public Double getBudgetLimit(String owner, String category) {
+        try (ResultSet rs = executeQuery("SELECT BudgetAmount FROM Budgets WHERE Owner = ? AND Category = ?", owner, category)) {
+            if (rs != null && rs.next()) {
+                return rs.getDouble("BudgetAmount");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    public double getBudgetSpent(String owner, String category) {
+        try (ResultSet rs = executeQuery("SELECT BudgetSpent FROM Budgets WHERE Owner = ? AND Category = ?", owner, category)) {
+            if (rs != null && rs.next()) {
+                return rs.getDouble("BudgetSpent");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return 0.0;
+    }
+
+    public double getSpentAmountForCurrentMonth(String owner, String category) {
+        String sql = "SELECT IFNULL(SUM(Amount), 0) as Total " +
+                "FROM Transactions " +
+                "WHERE Sender = ? AND Category = ? " +
+                "AND strftime('%Y-%m', Date) = strftime('%Y-%m', 'now')";
+        try (ResultSet rs = executeQuery(sql, owner, category)) {
+            if (rs != null && rs.next()) {
+                return rs.getDouble("Total");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return 0.0;
+    }
+
+    public void updateBudgetSpent(String owner, String category, double spent) {
+        executeUpdate(
+                "UPDATE Budgets SET BudgetSpent = ? WHERE Owner = ? AND Category = ?",
+                spent, owner, category
         );
     }
 

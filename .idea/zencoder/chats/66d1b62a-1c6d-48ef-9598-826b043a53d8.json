@@ -1,0 +1,193 @@
+{
+    "checksum": "9b55cf8665aa9d75af779f3c010f25a7ec0f44bd1eda6cadf1fcdb40dec14c0b",
+    "data": {
+    "id": "66d1b62a-1c6d-48ef-9598-826b043a53d8",
+    "createdAt": 1760455644991,
+    "updatedAt": 1760456640487,
+    "title": "Budget Feature Fix Review",
+    "messages": [
+        {
+            "id": "525fa40c-79b5-4735-a4e2-61f1e6b5da9e",
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "the budget creation feature is fixed but the checking of amount left in the budget is not done"
+                }
+            ],
+            "context": {
+                "currentFile": {
+                    "path": "src/main/java/com/smartfinance/Controller/Client/BudgetController.java",
+                    "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/Controller/Client/BudgetController.java",
+                    "sources": [
+                        "opened_tab"
+                    ],
+                    "content": "package com.smartfinance.Controller.Client;\n\nimport com.smartfinance.Models.Budget;\nimport com.smartfinance.Models.Client;\nimport com.smartfinance.Models.Model;\nimport com.smartfinance.Views.CategoryTransaction;\nimport javafx.collections.FXCollections;\nimport javafx.collections.ObservableList;\nimport javafx.fxml.FXML;\nimport javafx.fxml.Initializable;\nimport javafx.scene.control.*;\nimport javafx.scene.control.Alert.AlertType;\n\nimport java.net.URL;\nimport java.util.ResourceBundle;\n\npublic class BudgetController implements Initializable {\n    @FXML\n    private Button create_budget_btn;\n    @FXML\n    private ListView<Budget> budget_list;\n    @FXML\n    private ComboBox<String> category_budget;\n    @FXML\n    private TextField amount_budget;\n    @FXML\n    private ComboBox<String> change_budget;\n    @FXML\n    private TextField change_amount;\n    @FXML\n    private Button change_btn;\n    @FXML\n    private ComboBox<String> delete_category;\n    @FXML\n    private Button delete_btn;\n\n    private final Model model = Model.getInstance();\n    private Client loggedInClient;\n    private ObservableList<Budget> budgets = FXCollections.observableArrayList();\n\n    @Override\n    public void initialize(URL url, ResourceBundle resourceBundle) {\n        loggedInClient = model.getLoggedInClient();\n        budget_list.setItems(budgets);\n\n        bindCategoryInputs();\n        refreshBudgetList();\n\n        // ✅ Create budget\n        create_budget_btn.setOnAction(event -> onCreateBudget());\n\n        // ✅ Change budget (supports selection OR category name)\n        change_btn.setOnAction(event -> onUpdateBudget());\n\n        // ✅ Delete budget (by selection OR category name)\n        delete_btn.setOnAction(event -> onDeleteBudget());\n\n        budget_list.setCellFactory(list -> new ListCell<Budget>() {\n            @Override\n            protected void updateItem(Budget budget, boolean empty) {\n                super.updateItem(budget, empty);\n                if (empty || budget == null) {\n                    setText(null);\n                } else {\n                    setText(String.format(\"%s : ₹%.2f\", budget.getCategory(), budget.getAmount()));\n                }\n            }\n        });\n    }\n\n    private void bindCategoryInputs() {\n        ObservableList<String> categories = CategoryTransaction.getAvailableCategories();\n\n        configureCategoryCombo(category_budget, categories);\n        configureCategoryCombo(change_budget, categories);\n        configureCategoryCombo(delete_category, categories);\n\n        budget_list.getSelectionModel().selectedItemProperty().addListener((obs, oldBudget, newBudget) -> {\n            if (newBudget != null) {\n                change_budget.setValue(newBudget.getCategory());\n                delete_category.setValue(newBudget.getCategory());\n            }\n        });\n    }\n\n    private void configureCategoryCombo(ComboBox<String> comboBox, ObservableList<String> categories) {\n        comboBox.setEditable(true);\n        comboBox.setItems(categories);\n    }\n\n    private String resolveCategoryInput(ComboBox<String> comboBox) {\n        String text = comboBox.getEditor().getText();\n        if (text == null || text.trim().isEmpty()) {\n            text = comboBox.getValue();\n        }\n        return text == null ? \"\" : text.trim();\n    }\n\n    private void clearComboBox(ComboBox<String> comboBox) {\n        comboBox.getSelectionModel().clearSelection();\n        comboBox.setValue(null);\n        comboBox.getEditor().clear();\n    }\n\n    private void refreshBudgetList() {\n        budgets.clear();\n        if (loggedInClient == null) {\n            return;\n        }\n        budgets.addAll(model.getBudgets());\n    }\n\n    private void onCreateBudget() {\n        if (loggedInClient == null) {\n            showWarning(\"No Client\", \"You must be logged in to create a budget.\");\n            return;\n        }\n\n        String category = resolveCategoryInput(category_budget);\n        String amountValue = amount_budget.getText().trim();\n\n        if (category.isEmpty() || amountValue.isEmpty()) {\n            showWarning(\"Missing Fields\", \"Please enter both category and amount.\");\n            return;\n        }\n\n        double monthlyLimit;\n        try {\n            monthlyLimit = Double.parseDouble(amountValue);\n            if (monthlyLimit <= 0) {\n                showWarning(\"Invalid Amount\", \"Monthly limit must be greater than zero.\");\n                return;\n            }\n        } catch (NumberFormatException ex) {\n            showWarning(\"Invalid Number\", \"Please enter a numeric value for amount.\");\n            return;\n        }\n\n        boolean saved = model.saveBudget(loggedInClient.getPayeeAddress(), category, monthlyLimit);\n        if (saved) {\n            refreshBudgetList();\n            clearComboBox(category_budget);\n            amount_budget.clear();\n            showInfo(\"Budget Saved\", \"Budget for category '\" + category + \"' saved successfully.\");\n        } else {\n            showWarning(\"Save Failed\", \"Unable to save budget. It may already exist or there was a database error.\");\n        }\n    }\n\n    private void onUpdateBudget() {\n        if (loggedInClient == null) {\n            showWarning(\"No Client\", \"You must be logged in to update a budget.\");\n            return;\n        }\n\n        String categoryToChange = \"\";\n        String newAmount = change_amount.getText().trim();\n\n        Budget selectedBudget = budget_list.getSelectionModel().getSelectedItem();\n        if (selectedBudget != null) {\n            categoryToChange = selectedBudget.getCategory();\n        } else {\n            categoryToChange = resolveCategoryInput(change_budget);\n        }\n\n        if (categoryToChange.isEmpty() || newAmount.isEmpty()) {\n            showWarning(\"Invalid Input\", \"Please enter the category (or select) and new amount.\");\n            return;\n        }\n\n        double monthlyLimit;\n        try {\n            monthlyLimit = Double.parseDouble(newAmount);\n            if (monthlyLimit <= 0) {\n                showWarning(\"Invalid Amount\", \"Monthly limit must be greater than zero.\");\n                return;\n            }\n        } catch (NumberFormatException ex) {\n            showWarning(\"Invalid Number\", \"Please enter a numeric value for amount.\");\n            return;\n        }\n\n        boolean saved = model.saveBudget(loggedInClient.getPayeeAddress(), categoryToChange, monthlyLimit);\n        if (saved) {\n            refreshBudgetList();\n            clearComboBox(change_budget);\n            change_amount.clear();\n            showInfo(\"Budget Updated\", \"Budget for category '\" + categoryToChange + \"' updated successfully.\");\n        } else {\n            showWarning(\"Update Failed\", \"Unable to update budget. Please try again.\");\n        }\n    }\n\n    private void onDeleteBudget() {\n        if (loggedInClient == null) {\n            showWarning(\"No Client\", \"You must be logged in to delete a budget.\");\n            return;\n        }\n\n        Budget selectedBudget = budget_list.getSelectionModel().getSelectedItem();\n        String categoryToDelete = resolveCategoryInput(delete_category);\n\n        if (selectedBudget != null) {\n            categoryToDelete = selectedBudget.getCategory();\n        }\n\n        if (categoryToDelete.isEmpty()) {\n            showWarning(\"No Category\", \"Please select a budget or enter a category to delete.\");\n            return;\n        }\n\n        boolean deleted = model.deleteBudget(loggedInClient.getPayeeAddress(), categoryToDelete);\n        if (deleted) {\n            refreshBudgetList();\n            clearComboBox(delete_category);\n            showInfo(\"Budget Deleted\", \"Budget for category '\" + categoryToDelete + \"' deleted successfully.\");\n        } else {\n            showWarning(\"Delete Failed\", \"Unable to delete budget. Please try again.\");\n        }\n    }\n\n    /**\n     * Utility method to show warning alerts.\n     */\n    private void showWarning(String title, String message) {\n        Alert alert = new Alert(AlertType.WARNING);\n        alert.setTitle(\"Warning\");\n        alert.setHeaderText(title);\n        alert.setContentText(message);\n        alert.showAndWait();\n    }\n\n    private void showInfo(String title, String message) {\n        Alert alert = new Alert(AlertType.INFORMATION);\n        alert.setTitle(\"Information\");\n        alert.setHeaderText(title);\n        alert.setContentText(message);\n        alert.showAndWait();\n    }\n}\n",
+                    "language": "java"
+                },
+                "usedRules": [
+                    "zen-rules://user/custom"
+                ]
+            },
+            "createdAt": 1760455645005,
+            "isInternal": false,
+            "rawContent": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": " the budget creation feature is fixed but the checking of amount left in the budget is not done "
+                            }
+                        ]
+                    }
+                ]
+            },
+            "autoAppliedRules": [
+                {
+                    "name": "User AI Instruction",
+                    "description": "User AI Instruction",
+                    "uri": "zen-rules://user/custom",
+                    "content": "✅ Full Tech Stack for Your Smart Personal Finance & Investment Manager\nArea\tTechnologies\tPurpose\nCore Language\tJava 17+\tMain development\nUI\tJavaFX\tDesktop GUI\nData Storage\tSQLite (local), MySQL/PostgreSQL (cloud/web)\tPersist transactions, user data\nBuild Tool\tMaven or Gradle\tDependency management\nCharting\tJavaFX Charts or JFreeChart\tDashboard visualization\nAPI Calls\tJava HttpClient, Retrofit (optional)\tFetch stock/ETF data\nMachine Learning\tWeka or custom Java logic\tRisk profile analyzer\nPDF/CSV Export\tApache PDFBox / iText (PDF), OpenCSV\tFinancial report export\nAuthentication\tCustom login system (hashed passwords, Java Crypto), or Firebase/Auth0 (web version)\tSecure login\nNotifications\tJavaFX Alert, desktop notifications (java.awt.SystemTray)\tBudget/investment alerts\nScheduling\tScheduledExecutorService, Quartz Scheduler\tAuto data refresh, alerts\nOptional Web Version\tSpring Boot + Thymeleaf (or REST + React)\tIf you want to turn this into a web app later\n\n✅ Mapping Features to Technologies\n 1. User Authentication\nFeature\tTools\nSecure login/signup\tJavaFX form + hashed passwords (e.g., SHA-256 with salt)\nSession management\tStore current user ID/session info in memory or DB\n\n 2. Add/Edit/Delete Transactions\nFeature\tTools\nForm UI\tJavaFX\nStorage\tSQLite / MySQL\nDate input\tJavaFX DatePicker\n\n 3. Categorize Transactions\nFeature\tTools\nManual\tDropdown in JavaFX\nAuto\tKeyword mapping logic in Java\n\n 4. Dashboard with Charts\nFeature\tTools\nMonthly Spending / Income vs Expenses\tJavaFX LineChart / BarChart / PieChart\nSavings Growth\tLineChart with time series data\n\n 5. Budget Setup & Alerts\nFeature\tTools\nBudget input\tJavaFX input fields\nAlerts\tJavaFX Alert or tray popup using SystemTray\nAuto-check\tScheduledExecutorService to compare actual vs. budget regularly\n\n 6. Recurring Expense Handling\nFeature\tTools\nPattern recognition\tJava logic: group transactions by name/date interval\nAuto-categorization\tIdentify frequency (e.g., same vendor every 30 days)\n\n 7. Export to CSV / PDF\nFeature\tTools\nCSV\tOpenCSV\nPDF\tiText or Apache PDFBox\n\n Investment Features\n 1. AI-Based Risk Profile Analyzer\nFeature\tTools\nRisk quiz\tJavaFX form\nAnalysis\tJava logic or Weka ML model\nResult categories\tConservative, Moderate, Aggressive\n\n Store results for future recommendations.\n\n 2. Safe Stocks & ETF Recommender\nFeature\tTools\nData\tFinnhub API / Alpha Vantage\nFetching\tJava HttpClient, JSON parsing\nLogic\tFilter by market cap, beta, volume, dividend\nUI\tListView or CardView in JavaFX showing suggestions with short descriptions\n\n 3. Auto-Invest Planner\nFeature\tTools\nSurplus calculation\tTotal Income - Total Expense\nSuggestions\tRule-based logic based on risk profile\nUI\tMonthly suggestion popups or sidebar panel\n\n 4. \"Learn While You Invest\"\nFeature\tTools\nTips data\tJSON file or embedded DB table\nDisplay\tTooltips in JavaFX, or context-aware popups\n\n 5. Smart Alerts for Investment Opportunities\nFeature\tTools\nPolling\tScheduledExecutorService fetches API data\nConditions\te.g., \"Stock X dropped 5%\"\nAlerts\tJavaFX or SystemTray popup\nStorage\tSave alert history in SQLite\n\n Folder Structure Example\npgsql\nCopy\nEdit\ncom.smartfinance\n├── Main.java\n├── auth\n│   ├── LoginController.java\n│   └── RegisterController.java\n├── dashboard\n│   ├── DashboardController.java\n│   └── ChartUtils.java\n├── model\n│   ├── User.java\n│   ├── Transaction.java\n│   └── RiskProfile.java\n├── service\n│   ├── TransactionService.java\n│   ├── InvestmentService.java\n│   ├── RiskAnalyzer.java\n│   └── APIClient.java\n├── util\n│   ├── DatabaseHelper.java\n│   ├── CSVExporter.java\n│   └── PDFGenerator.java\n├── view\n│   ├── login.fxml\n│   ├── dashboard.fxml\n│   └── charts.fxml\n└── resources\n    ├── tips.json\n    └── application.properties\n Suggested Roadmap to Build\nPhase 1: Core Personal Finance\n User Auth (Login/Register)\n\n Add/Edit/Delete Transactions\n\n Categorize & Store Transactions\n\n Dashboard Charts\n\n Budget Setup & Alerts\n\nPhase 2: Advanced Automation\n Recurring Expense Detection\n\n Export to PDF/CSV\n\n Notifications via tray or in-app\n\nPhase 3: Investment Module\n Risk Profiler\n\n Safe Stock Recommender\n\n Auto-Invest Planner\n\n Investment Education Tips\n\n Real-time Alerts\n\n Tools & Libraries Summary\nArea\tTool\nUI\tJavaFX\nCharts\tJavaFX, JFreeChart\nData Storage\tSQLite, H2 (dev), MySQL (prod)\nAPI\tFinnhub, Alpha Vantage\nJSON\torg.json, Jackson, or Gson\nScheduling\tScheduledExecutorService\nCSV\tOpenCSV\nPDF\tiText, Apache PDFBox\nML\tWeka (risk analysis)\nAuthentication\tJava MessageDigest or bcrypt (JBCrypt)\nLogging\tSLF4J + Logback (make sure that these features are perfectly working)",
+                    "alwaysApply": true
+                }
+            ]
+        },
+        {
+            "id": "43cdc008-1556-4050-86c2-3411901ab41e",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "thought",
+                    "text": "**Checking repository rules file**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_bTIX6eAdYhpj9AoIAtBP0bUp",
+                    "statusText": "Viewed directory",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": ".zencoder",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/.zencoder"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Locating repository file**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_zbVCsATWDTKD78MSlUiZ0MK9",
+                    "statusText": "Viewed directory",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": ".zencoder/rules",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/.zencoder/rules"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Noticing missing files**"
+                },
+                {
+                    "type": "text",
+                    "text": " Repository# Context Missing\n\nI couldn find’t the expected `C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/.zencoder/rules/repo.md`. Having this file in place helps me understand the project layout and provide more accurate guidance. Let me know if you’d like me to outline what typically goes into that file so you can add it."
+                }
+            ],
+            "context": {
+                "author": "Code agent",
+                "operationId": "fcc69a18-fe50-435b-ac1f-5d9f3d10be6f"
+            },
+            "createdAt": 1760455672763,
+            "isInternal": false
+        },
+        {
+            "id": "c5ccde41-f9c3-4e2f-bef0-ce4bcb18ef9e",
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "fix"
+                }
+            ],
+            "context": {
+                "currentFile": {
+                    "path": "src/main/java/com/smartfinance/Controller/Client/BudgetController.java",
+                    "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/Controller/Client/BudgetController.java",
+                    "sources": [
+                        "opened_tab"
+                    ],
+                    "content": "package com.smartfinance.Controller.Client;\n\nimport com.smartfinance.Models.Budget;\nimport com.smartfinance.Models.Client;\nimport com.smartfinance.Models.Model;\nimport com.smartfinance.Views.CategoryTransaction;\nimport javafx.collections.FXCollections;\nimport javafx.collections.ObservableList;\nimport javafx.fxml.FXML;\nimport javafx.fxml.Initializable;\nimport javafx.scene.control.*;\nimport javafx.scene.control.Alert.AlertType;\n\nimport java.net.URL;\nimport java.util.ResourceBundle;\n\npublic class BudgetController implements Initializable {\n    @FXML\n    private Button create_budget_btn;\n    @FXML\n    private ListView<Budget> budget_list;\n    @FXML\n    private ComboBox<String> category_budget;\n    @FXML\n    private TextField amount_budget;\n    @FXML\n    private ComboBox<String> change_budget;\n    @FXML\n    private TextField change_amount;\n    @FXML\n    private Button change_btn;\n    @FXML\n    private ComboBox<String> delete_category;\n    @FXML\n    private Button delete_btn;\n\n    private final Model model = Model.getInstance();\n    private Client loggedInClient;\n    private ObservableList<Budget> budgets = FXCollections.observableArrayList();\n\n    @Override\n    public void initialize(URL url, ResourceBundle resourceBundle) {\n        loggedInClient = model.getLoggedInClient();\n        budget_list.setItems(budgets);\n\n        bindCategoryInputs();\n        refreshBudgetList();\n\n        // ✅ Create budget\n        create_budget_btn.setOnAction(event -> onCreateBudget());\n\n        // ✅ Change budget (supports selection OR category name)\n        change_btn.setOnAction(event -> onUpdateBudget());\n\n        // ✅ Delete budget (by selection OR category name)\n        delete_btn.setOnAction(event -> onDeleteBudget());\n\n        budget_list.setCellFactory(list -> new ListCell<Budget>() {\n            @Override\n            protected void updateItem(Budget budget, boolean empty) {\n                super.updateItem(budget, empty);\n                if (empty || budget == null) {\n                    setText(null);\n                } else {\n                    setText(String.format(\"%s : ₹%.2f\", budget.getCategory(), budget.getAmount()));\n                }\n            }\n        });\n    }\n\n    private void bindCategoryInputs() {\n        ObservableList<String> categories = CategoryTransaction.getAvailableCategories();\n\n        configureCategoryCombo(category_budget, categories);\n        configureCategoryCombo(change_budget, categories);\n        configureCategoryCombo(delete_category, categories);\n\n        budget_list.getSelectionModel().selectedItemProperty().addListener((obs, oldBudget, newBudget) -> {\n            if (newBudget != null) {\n                change_budget.setValue(newBudget.getCategory());\n                delete_category.setValue(newBudget.getCategory());\n            }\n        });\n    }\n\n    private void configureCategoryCombo(ComboBox<String> comboBox, ObservableList<String> categories) {\n        comboBox.setEditable(true);\n        comboBox.setItems(categories);\n    }\n\n    private String resolveCategoryInput(ComboBox<String> comboBox) {\n        String text = comboBox.getEditor().getText();\n        if (text == null || text.trim().isEmpty()) {\n            text = comboBox.getValue();\n        }\n        return text == null ? \"\" : text.trim();\n    }\n\n    private void clearComboBox(ComboBox<String> comboBox) {\n        comboBox.getSelectionModel().clearSelection();\n        comboBox.setValue(null);\n        comboBox.getEditor().clear();\n    }\n\n    private void refreshBudgetList() {\n        budgets.clear();\n        if (loggedInClient == null) {\n            return;\n        }\n        budgets.addAll(model.getBudgets());\n    }\n\n    private void onCreateBudget() {\n        if (loggedInClient == null) {\n            showWarning(\"No Client\", \"You must be logged in to create a budget.\");\n            return;\n        }\n\n        String category = resolveCategoryInput(category_budget);\n        String amountValue = amount_budget.getText().trim();\n\n        if (category.isEmpty() || amountValue.isEmpty()) {\n            showWarning(\"Missing Fields\", \"Please enter both category and amount.\");\n            return;\n        }\n\n        double monthlyLimit;\n        try {\n            monthlyLimit = Double.parseDouble(amountValue);\n            if (monthlyLimit <= 0) {\n                showWarning(\"Invalid Amount\", \"Monthly limit must be greater than zero.\");\n                return;\n            }\n        } catch (NumberFormatException ex) {\n            showWarning(\"Invalid Number\", \"Please enter a numeric value for amount.\");\n            return;\n        }\n\n        boolean saved = model.saveBudget(loggedInClient.getPayeeAddress(), category, monthlyLimit);\n        if (saved) {\n            refreshBudgetList();\n            clearComboBox(category_budget);\n            amount_budget.clear();\n            showInfo(\"Budget Saved\", \"Budget for category '\" + category + \"' saved successfully.\");\n        } else {\n            showWarning(\"Save Failed\", \"Unable to save budget. It may already exist or there was a database error.\");\n        }\n    }\n\n    private void onUpdateBudget() {\n        if (loggedInClient == null) {\n            showWarning(\"No Client\", \"You must be logged in to update a budget.\");\n            return;\n        }\n\n        String categoryToChange = \"\";\n        String newAmount = change_amount.getText().trim();\n\n        Budget selectedBudget = budget_list.getSelectionModel().getSelectedItem();\n        if (selectedBudget != null) {\n            categoryToChange = selectedBudget.getCategory();\n        } else {\n            categoryToChange = resolveCategoryInput(change_budget);\n        }\n\n        if (categoryToChange.isEmpty() || newAmount.isEmpty()) {\n            showWarning(\"Invalid Input\", \"Please enter the category (or select) and new amount.\");\n            return;\n        }\n\n        double monthlyLimit;\n        try {\n            monthlyLimit = Double.parseDouble(newAmount);\n            if (monthlyLimit <= 0) {\n                showWarning(\"Invalid Amount\", \"Monthly limit must be greater than zero.\");\n                return;\n            }\n        } catch (NumberFormatException ex) {\n            showWarning(\"Invalid Number\", \"Please enter a numeric value for amount.\");\n            return;\n        }\n\n        boolean saved = model.saveBudget(loggedInClient.getPayeeAddress(), categoryToChange, monthlyLimit);\n        if (saved) {\n            refreshBudgetList();\n            clearComboBox(change_budget);\n            change_amount.clear();\n            showInfo(\"Budget Updated\", \"Budget for category '\" + categoryToChange + \"' updated successfully.\");\n        } else {\n            showWarning(\"Update Failed\", \"Unable to update budget. Please try again.\");\n        }\n    }\n\n    private void onDeleteBudget() {\n        if (loggedInClient == null) {\n            showWarning(\"No Client\", \"You must be logged in to delete a budget.\");\n            return;\n        }\n\n        Budget selectedBudget = budget_list.getSelectionModel().getSelectedItem();\n        String categoryToDelete = resolveCategoryInput(delete_category);\n\n        if (selectedBudget != null) {\n            categoryToDelete = selectedBudget.getCategory();\n        }\n\n        if (categoryToDelete.isEmpty()) {\n            showWarning(\"No Category\", \"Please select a budget or enter a category to delete.\");\n            return;\n        }\n\n        boolean deleted = model.deleteBudget(loggedInClient.getPayeeAddress(), categoryToDelete);\n        if (deleted) {\n            refreshBudgetList();\n            clearComboBox(delete_category);\n            showInfo(\"Budget Deleted\", \"Budget for category '\" + categoryToDelete + \"' deleted successfully.\");\n        } else {\n            showWarning(\"Delete Failed\", \"Unable to delete budget. Please try again.\");\n        }\n    }\n\n    /**\n     * Utility method to show warning alerts.\n     */\n    private void showWarning(String title, String message) {\n        Alert alert = new Alert(AlertType.WARNING);\n        alert.setTitle(\"Warning\");\n        alert.setHeaderText(title);\n        alert.setContentText(message);\n        alert.showAndWait();\n    }\n\n    private void showInfo(String title, String message) {\n        Alert alert = new Alert(AlertType.INFORMATION);\n        alert.setTitle(\"Information\");\n        alert.setHeaderText(title);\n        alert.setContentText(message);\n        alert.showAndWait();\n    }\n}\n",
+                    "language": "java"
+                },
+                "usedRules": [
+                    "zen-rules://user/custom"
+                ]
+            },
+            "createdAt": 1760455737305,
+            "isInternal": false,
+            "rawContent": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "fix"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "autoAppliedRules": []
+        },
+        {
+            "id": "60a02457-83d1-4501-937a-e18ee49ed117",
+            "role": "system",
+            "content": [
+                {
+                    "type": "errorText",
+                    "text": "",
+                    "title": "You've hit your plan usage limits",
+                    "actions": [
+                        {
+                            "type": "upgradePlan",
+                            "title": "Upgrade plan",
+                            "waitSeconds": 85598
+                        },
+                        {
+                            "type": "externalAction",
+                            "title": "Try Again",
+                            "action": "regenerateLastAnswer"
+                        }
+                    ]
+                }
+            ],
+            "createdAt": 1760456640487,
+            "isInternal": false
+        }
+    ],
+    "isAgent": true,
+    "isNameGenerated": true,
+    "isCustomAgent": false,
+    "isUnitTestsAgent": false,
+    "isE2EAgent": false,
+    "isWebDevAgent": false,
+    "isQnaAgent": false,
+    "isRepoInfoAgent": false,
+    "model": "default"
+}
+}

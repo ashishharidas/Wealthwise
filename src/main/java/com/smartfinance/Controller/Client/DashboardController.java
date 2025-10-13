@@ -1,8 +1,10 @@
 package com.smartfinance.Controller.Client;
 
+import com.smartfinance.Models.Budget;
 import com.smartfinance.Models.Client;
 import com.smartfinance.Models.Model;
 import com.smartfinance.Models.Transaction;
+import com.smartfinance.Views.CategoryTransaction;
 import com.smartfinance.Views.TransactionCellFactory;
 import javafx.collections.FXCollections;
 import javafx.fxml.Initializable;
@@ -12,6 +14,7 @@ import javafx.scene.text.Text;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Optional;
 import java.util.ResourceBundle;
 import java.net.URL;
 
@@ -50,6 +53,9 @@ public class DashboardController implements Initializable {
             // Load transactions
             loadTransactionHistory(client);
 
+            // Load and monitor budgets
+            refreshBudgetAlerts(client);
+
             // Set up send money button
             send_money_btn.setOnAction(event -> onSendMoney());
 
@@ -58,8 +64,32 @@ public class DashboardController implements Initializable {
                 refresh_btn.setOnAction(event -> onRefresh());
             }
 
-            // Populate category choices
-            category_transaction.setItems(FXCollections.observableArrayList("Transfer", "Food", "Entertainment", "Utilities", "Healthcare", "Education", "Other"));
+            // Populate category choices with dynamic list (including defaults)
+            category_transaction.setItems(CategoryTransaction.getAvailableCategories());
+        }
+    }
+
+    private void refreshBudgetAlerts(Client client) {
+        if (client == null) {
+            return;
+        }
+
+        Model model = Model.getInstance();
+        String owner = client.getPayeeAddress();
+
+        for (Budget budget : model.getBudgets()) {
+            double remaining = model.getRemainingBudgetForCurrentMonth(owner, budget.getCategory());
+
+            if (remaining <= 0) {
+                showAlert(Alert.AlertType.WARNING,
+                        "Budget Exceeded",
+                        String.format("You have exceeded the budget for %s this month.", budget.getCategory()));
+            } else if (remaining <= budget.getAmount() * 0.1) {
+                showAlert(Alert.AlertType.INFORMATION,
+                        "Budget Alert",
+                        String.format("You are close to exceeding the budget for %s. Only ₹%.2f left this month.",
+                                budget.getCategory(), remaining));
+            }
         }
     }
 
@@ -72,6 +102,8 @@ public class DashboardController implements Initializable {
         if (client != null) {
             updateAccountLabels(client);
             loadTransactionHistory(client);
+            refreshBudgetAlerts(client);
+            Model.getInstance().notifyClientDataRefreshed();
         }
 
         System.out.println("Dashboard refreshed successfully!");
@@ -167,6 +199,28 @@ public class DashboardController implements Initializable {
         if (!model.clientExists(payeeAddress)) {
             showAlert(Alert.AlertType.ERROR, "Invalid Payee", "Receiver address not found in system.");
             return;
+        }
+
+        Optional<Budget> matchingBudget = model.findBudget(category);
+        if (matchingBudget.isPresent()) {
+            double monthlyLimit = matchingBudget.get().getAmount();
+            double spentThisMonth = model.getBudgetSpentForCurrentMonth(senderAddress, category);
+            double remaining = monthlyLimit - spentThisMonth;
+
+            if (remaining <= 0) {
+                showAlert(Alert.AlertType.WARNING,
+                        "Budget Exceeded",
+                        String.format("You have already exceeded the budget for %s. Transaction cancelled.", category));
+                return;
+            }
+
+            if (amount > remaining) {
+                showAlert(Alert.AlertType.WARNING,
+                        "Budget Limit",
+                        String.format("This transaction exceeds your remaining budget for %s (left ₹%.2f). Transaction cancelled.",
+                                category, remaining));
+                return;
+            }
         }
 
         boolean success = model.transferMoney(senderAddress, payeeAddress, amount, category, message);
