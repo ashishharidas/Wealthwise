@@ -8,6 +8,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 
 import java.net.URL;
+import java.time.format.DateTimeFormatter;
 import java.util.ResourceBundle;
 
 public class ClientCellController implements Initializable {
@@ -27,6 +28,8 @@ public class ClientCellController implements Initializable {
     @FXML
     private Label wallet_acc_number;
     @FXML
+    private Label date_label;
+    @FXML
     private Button delete_btn;
 
     private final Client client;
@@ -40,6 +43,7 @@ public class ClientCellController implements Initializable {
         fname_lbl.setText(client.getFirstName());
         lname_lbl.setText(client.getLastName());
         pAddress_lbl.setText(client.getPayeeAddress());
+
         if (client.getSavingsAccount() != null) {
             sav_balance.setText("₹" + String.format("%.2f", client.getSavingsAccount().getBalance()));
             sav_acc_number.setText(client.getSavingsAccount().getAccNumber());
@@ -56,8 +60,12 @@ public class ClientCellController implements Initializable {
             wallet_acc_number.setText("—");
         }
 
-        delete_btn.setOnAction(event -> {
-            Model.getInstance().deleteClient(client);
-        });
+        if (client.getDateCreated() != null) {
+            date_label.setText(client.getDateCreated().format(DateTimeFormatter.ofPattern("dd-MM-yyyy")));
+        } else {
+            date_label.setText("—");
+        }
+
+        delete_btn.setOnAction(event -> Model.getInstance().deleteClient(client));
     }
 }
