@@ -23,13 +23,10 @@
             <TextField fx:id="password" layoutX="10.0" layoutY="72.0" minHeight="-Infinity" minWidth="-Infinity" prefHeight="30.0" prefWidth="139.0" />
             <Label layoutX="10.0" layoutY="98.0" styleClass="payee_address_lbl" stylesheets="@../../Styles/CreateClient.css" text="Payee Address (Email) :" />
             <TextField fx:id="payee_address" layoutX="10.0" layoutY="116.0" minHeight="-Infinity" minWidth="-Infinity" prefHeight="30.0" prefWidth="139.0" promptText="client@example.com" />
-            <Label layoutX="10.0" layoutY="142.0" text="Add Accounts" />
-            <CheckBox fx:id="add_wallet_check" layoutX="10.0" layoutY="160.0" mnemonicParsing="false" text="Add  Wallet :" />
             <Label layoutX="10.0" layoutY="142.0" text="Wallet Balance :" />
-            <TextField fx:id="wallet_balance" layoutX="10.0" layoutY="116.0" minHeight="-Infinity" minWidth="-Infinity" prefHeight="30.0" prefWidth="139.0" />
-            <CheckBox fx:id="saving_check" layoutX="10.0" layoutY="195.0" mnemonicParsing="false" text="Add  Savings Account :" />
-            <Label layoutX="10.0" layoutY="212.0" text="Account Balance" />
-            <TextField fx:id="account_balance" layoutX="10.0" layoutY="230.0" maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="30.0" prefWidth="139.0" />
+            <TextField fx:id="wallet_balance" layoutX="10.0" layoutY="160.0" minHeight="-Infinity" minWidth="-Infinity" prefHeight="30.0" prefWidth="139.0" />
+            <Label layoutX="10.0" layoutY="195.0" text="Savings Account Balance :" />
+            <TextField fx:id="account_balance" layoutX="10.0" layoutY="213.0" maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="30.0" prefWidth="139.0" />
             <Button fx:id="create_client_button" mnemonicParsing="false" styleClass="create_client_container_Button" text="Create New Client">
                <graphic>
                   <ImageView fitHeight="21.0" fitWidth="21.0">

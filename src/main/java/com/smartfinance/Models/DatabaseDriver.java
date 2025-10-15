@@ -200,7 +200,7 @@ public class DatabaseDriver {
         String accNumber = getNextAccountNumber("SavingsAccounts");
         LocalDate date = LocalDate.now();
         executeUpdate(
-                "INSERT INTO SavingsAccounts (Owner, AccountNumber, Balance, TransactionLimit, date_created) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO SavingsAccounts (Owner, AccountNumber, Balance, TransactionLimit, Date) VALUES (?, ?, ?, ?, ?)",
                 owner, accNumber, balance, 100000, date.toString()
         );
     }
