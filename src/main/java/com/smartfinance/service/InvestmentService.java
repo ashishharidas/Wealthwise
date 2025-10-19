@@ -32,64 +32,108 @@ public class InvestmentService {
 
     public List<StockSuggestion> getStockSuggestions(RiskProfile risk) {
         List<StockSuggestion> suggestions = new ArrayList<>();
-        try {
-            JSONArray data = new JSONArray();
-            if (risk == RiskProfile.AGGRESSIVE) {
-                // For aggressive, use most active stocks (higher volume, potentially more volatile)
+        JSONArray data = new JSONArray();
+
+        if (risk == RiskProfile.AGGRESSIVE) {
+            try {
                 String responseActive = apiClient.getNSEMostActive();
                 System.out.println("NSE Most Active Response: " + responseActive);
                 data = new JSONArray(responseActive);
-            } else {
-                // For conservative and moderate, use trending stocks
-                String response = apiClient.getTrendingStocks();
-                System.out.println("Trending Stocks Response: " + response);
-                JSONObject json = new JSONObject(response);
-
-                if (json.has("trending_stocks")) {
-                    JSONObject trendingStocks = json.getJSONObject("trending_stocks");
-                    JSONArray gainers = trendingStocks.has("top_gainers") ? trendingStocks.getJSONArray("top_gainers") : new JSONArray();
-                    JSONArray losers = trendingStocks.has("top_losers") ? trendingStocks.getJSONArray("top_losers") : new JSONArray();
-
-                    if (risk == RiskProfile.CONSERVATIVE) {
-                        // For conservative, use top losers (potentially undervalued/stable), and add from gainers if needed
-                        data = losers;
-                        // If less than 5, add from gainers
-                        for (int i = 0; i < gainers.length() && data.length() < 5; i++) {
-                            data.put(gainers.getJSONObject(i));
-                        }
-                    } else if (risk == RiskProfile.MODERATE) {
-                        // For moderate, use both top gainers and top losers to provide more options
-                        // Combine both arrays
-                        for (int i = 0; i < gainers.length(); i++) {
-                            data.put(gainers.getJSONObject(i));
-                        }
-                        for (int i = 0; i < losers.length(); i++) {
-                            data.put(losers.getJSONObject(i));
-                        }
-                    }
-                }
+            } catch (IOException | InterruptedException | RuntimeException e) {
+                System.err.println("Failed to fetch NSE most active: " + e.getMessage());
             }
-
-            for (int i = 0; i < data.length(); i++) {
-                JSONObject stock = data.getJSONObject(i);
-                String companyName;
-                String symbol;
-                if (risk == RiskProfile.AGGRESSIVE) {
-                    companyName = stock.getString("company");
-                    symbol = stock.getString("ticker");
-                } else {
-                    companyName = stock.getString("company_name");
-                    symbol = stock.getString("ric");
-                }
-                double price = stock.getDouble("price");
-                double percentChange = stock.getDouble("percent_change");
-                suggestions.add(new StockSuggestion(companyName, symbol, price, percentChange));
-            }
-
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
         }
+
+        if (data.length() == 0) {
+            try {
+                String alphaResponse = apiClient.getAlphaVantageTopGainersLosers();
+                System.out.println("Alpha Vantage TOP_GAINERS_LOSERS Response: " + alphaResponse);
+                JSONObject alphaJson = new JSONObject(alphaResponse);
+                JSONArray topGainers = alphaJson.optJSONArray("top_gainers");
+                JSONArray topLosers = alphaJson.optJSONArray("top_losers");
+                JSONArray mostActivelyTraded = alphaJson.optJSONArray("most_actively_traded");
+                data = buildAlphaSelection(risk, topGainers, topLosers, mostActivelyTraded);
+            } catch (IOException | InterruptedException | RuntimeException alphaException) {
+                System.err.println("Alpha Vantage data unavailable: " + alphaException.getMessage());
+            }
+        }
+
+        if (data.length() == 0) {
+            System.err.println("No live market data available; using offline suggestions for " + risk + " profile.");
+            suggestions.addAll(createFallbackSuggestions(risk));
+            return suggestions;
+        }
+
+        for (int i = 0; i < data.length(); i++) {
+            JSONObject stock = data.getJSONObject(i);
+            String companyName = stock.optString("company",
+                    stock.optString("company_name",
+                            stock.optString("ticker", stock.optString("symbol", "Unknown Company"))));
+            String symbol = stock.optString("ticker",
+                    stock.optString("symbol",
+                            stock.optString("ric", "Unknown Symbol")));
+            double price = stock.optDouble("price",
+                    stock.optDouble("price_current",
+                            stock.optDouble("last_price", 0.0)));
+            double percentChange = stock.optDouble("percent_change",
+                    stock.optDouble("change_percentage",
+                            stock.optDouble("percent_change_1d",
+                                    stock.optDouble("change", 0.0))));
+            suggestions.add(new StockSuggestion(companyName, symbol, price, percentChange));
+        }
+
         return suggestions;
+    }
+
+    private JSONArray buildAlphaSelection(RiskProfile risk, JSONArray topGainers, JSONArray topLosers, JSONArray mostActivelyTraded) {
+        JSONArray selection = new JSONArray();
+        switch (risk) {
+            case CONSERVATIVE -> {
+                appendLimited(selection, topLosers, 6);
+                appendLimited(selection, topGainers, 10);
+            }
+            case MODERATE -> {
+                appendLimited(selection, topGainers, 8);
+                appendLimited(selection, topLosers, 14);
+                appendLimited(selection, mostActivelyTraded, 18);
+            }
+            case AGGRESSIVE -> {
+                appendLimited(selection, topGainers, 8);
+                appendLimited(selection, mostActivelyTraded, 12);
+            }
+        }
+        return selection;
+    }
+
+    private void appendLimited(JSONArray target, JSONArray source, int maxSize) {
+        if (source == null) {
+            return;
+        }
+        for (int i = 0; i < source.length() && target.length() < maxSize; i++) {
+            target.put(source.getJSONObject(i));
+        }
+    }
+
+    private List<StockSuggestion> createFallbackSuggestions(RiskProfile risk) {
+        List<StockSuggestion> defaults = new ArrayList<>();
+        switch (risk) {
+            case CONSERVATIVE -> {
+                defaults.add(new StockSuggestion("HDFC Bank Ltd", "HDFCBANK", 1550.00, 0.45));
+                defaults.add(new StockSuggestion("Infosys Ltd", "INFY", 1405.00, 0.30));
+                defaults.add(new StockSuggestion("ITC Ltd", "ITC", 440.00, 0.25));
+            }
+            case MODERATE -> {
+                defaults.add(new StockSuggestion("Reliance Industries Ltd", "RELIANCE", 2435.00, 0.65));
+                defaults.add(new StockSuggestion("Tata Consultancy Services", "TCS", 3550.00, 0.55));
+                defaults.add(new StockSuggestion("Larsen & Toubro Ltd", "LT", 3330.00, 0.75));
+            }
+            case AGGRESSIVE -> {
+                defaults.add(new StockSuggestion("Adani Enterprises Ltd", "ADANIENT", 2800.00, 1.25));
+                defaults.add(new StockSuggestion("Tata Motors Ltd", "TATAMOTORS", 720.00, 1.05));
+                defaults.add(new StockSuggestion("State Bank of India", "SBIN", 570.00, 0.95));
+            }
+        }
+        return defaults;
     }
 
     public List<Double> getHistoricalPrices(String symbol, String period) {
