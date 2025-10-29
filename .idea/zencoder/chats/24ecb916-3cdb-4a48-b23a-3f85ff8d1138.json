@@ -1,0 +1,537 @@
+{
+    "checksum": "8b866cd2de0460532f8b397d5712423d78452744294de2a2ad1e5044fb166832",
+    "data": {
+    "id": "24ecb916-3cdb-4a48-b23a-3f85ff8d1138",
+    "createdAt": 1761070506532,
+    "updatedAt": 1761071488626,
+    "title": "Yahoo Finance Endpoints Integration",
+    "messages": [
+        {
+            "id": "5451e3f2-f680-400a-b483-89af858e1f63",
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "/symbol/earning /symbol/price-history /symbol/fundamental-timeseries /symbol/fundamental /symbol/calendar /symbol/corporate-action /symbol/sustainability /symbol/upgrade-downgrade /symbol/insider-holder /market/etf /market/crypto /market/overview … etc endpoints of yahoo finance adjust the investment service accordingly"
+                }
+            ],
+            "context": {
+                "currentFile": {
+                    "path": "src/main/java/com/smartfinance/service/InvestmentService.java",
+                    "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/service/InvestmentService.java",
+                    "sources": [
+                        "opened_tab"
+                    ],
+                    "content": "package com.smartfinance.service;\n\nimport com.smartfinance.Models.RiskProfile;\nimport org.json.JSONArray;\nimport org.json.JSONObject;\n\nimport java.io.IOException;\nimport java.util.*;\nimport java.util.stream.Collectors;\n\npublic class InvestmentService {\n\n    private static final int MAX_ACTIVE_SYMBOLS_TO_SCORE = 20;\n    private static final int MAX_TRENDING_SYMBOLS_TO_SCORE = 15;\n    private static final String DEFAULT_HISTORY_PERIOD = \"1M\";\n    private static final double TRADING_DAYS_PER_YEAR = 252d;\n\n    public static class StockSuggestion {\n        public String companyName;\n        public String symbol;\n        public double price;\n        public double percentChange;\n        public double volatility;\n        public double momentum;\n\n        public StockSuggestion(String companyName, String symbol, double price, double percentChange) {\n            this.companyName = companyName;\n            this.symbol = symbol;\n            this.price = price;\n            this.percentChange = percentChange;\n            this.volatility = Double.NaN;\n            this.momentum = Double.NaN;\n        }\n    }\n\n    private final APIClient apiClient;\n    private final Map<String, JSONObject> quoteCache = new HashMap<>();\n\n    public InvestmentService() {\n        this.apiClient = new APIClient();\n    }\n\n    // --------------------------- STOCK SUGGESTIONS ---------------------------\n\n    public List<StockSuggestion> getStockSuggestions(RiskProfile risk) {\n        List<StockSuggestion> suggestions = new ArrayList<>();\n        JSONArray data;\n\n        try {\n            data = fetchYahooTopMovers();\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch Yahoo Finance top movers: \" + e.getMessage());\n            return createFallbackSuggestions(risk);\n        }\n\n        if (data.isEmpty()) {\n            System.err.println(\"No live data available; using fallback for \" + risk + \".\");\n            return createFallbackSuggestions(risk);\n        }\n\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n        List<StockSuggestion> enriched = new ArrayList<>();\n\n        for (int i = 0; i < data.length() && enriched.size() < MAX_ACTIVE_SYMBOLS_TO_SCORE; i++) {\n            JSONObject stock = data.optJSONObject(i);\n            if (stock == null) continue;\n\n            StockSuggestion suggestion = mapYahooEntryToStockSuggestion(stock);\n            if (suggestion == null) continue;\n\n            suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n            suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n\n            if (isSuggestionSuitableForRisk(risk, suggestion)) {\n                enriched.add(suggestion);\n            }\n        }\n\n        suggestions.addAll(selectForRisk(risk, enriched));\n        if (suggestions.isEmpty()) suggestions.addAll(createFallbackSuggestions(risk));\n        return suggestions;\n    }\n\n    // --------------------------- TRENDING STOCKS ---------------------------\n\n    public List<StockSuggestion> getTrendingStocks() {\n        List<StockSuggestion> trending = new ArrayList<>();\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n\n        try {\n            JSONArray data = fetchYahooTopMovers();\n            for (int i = 0; i < data.length() && trending.size() < MAX_TRENDING_SYMBOLS_TO_SCORE; i++) {\n                JSONObject stock = data.optJSONObject(i);\n                if (stock == null) continue;\n\n                StockSuggestion suggestion = mapYahooEntryToStockSuggestion(stock);\n                if (suggestion == null) continue;\n\n                suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n                suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n                trending.add(suggestion);\n            }\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch trending stocks: \" + e.getMessage());\n            trending.addAll(createFallbackSuggestions(RiskProfile.MODERATE));\n        }\n\n        return trending;\n    }\n\n    // --------------------------- INDIVIDUAL STOCK ---------------------------\n\n    public StockSuggestion getStockDetails(String symbol) {\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n        try {\n            JSONObject quote = fetchYahooQuote(symbol);\n            StockSuggestion suggestion = mapYahooEntryToStockSuggestion(quote);\n            if (suggestion == null) return findFallbackSuggestion(symbol);\n\n            suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n            suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n            return suggestion;\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch Yahoo Finance details for \" + symbol + \": \" + e.getMessage());\n            return findFallbackSuggestion(symbol);\n        }\n    }\n\n    // --------------------------- YAHOO FINANCE FETCH ---------------------------\n\n    private JSONArray fetchYahooTopMovers() throws IOException, InterruptedException {\n        List<String> watchlist = List.of(\"RELIANCE.NS\", \"TCS.NS\", \"INFY.NS\", \"HDFCBANK.NS\", \"ITC.NS\");\n        JSONArray combined = new JSONArray();\n        Set<String> seen = new LinkedHashSet<>();\n\n        for (String symbol : watchlist) {\n            try {\n                JSONObject quote = fetchYahooQuote(symbol);\n                if (quote == null) continue;\n\n                String normalized = quote.optString(\"symbol\", symbol).toUpperCase(Locale.ROOT);\n                if (seen.add(normalized)) combined.put(quote);\n            } catch (Exception e) {\n                System.err.println(\"Skipping symbol \" + symbol + \": \" + e.getMessage());\n            }\n        }\n\n        return combined;\n    }\n\n    private JSONObject fetchYahooQuote(String symbol) throws IOException, InterruptedException {\n        if (symbol == null || symbol.isBlank())\n            throw new IOException(\"Symbol is required for Yahoo Finance quote\");\n\n        if (quoteCache.containsKey(symbol))\n            return quoteCache.get(symbol);\n\n        JSONObject chart = requestYahooFinanceChart(symbol, \"1mo\", \"1d\");\n        JSONArray results = chart.optJSONArray(\"result\");\n        if (results == null || results.isEmpty())\n            throw new IOException(\"Yahoo Finance chart missing 'result'\");\n\n        JSONObject firstResult = results.optJSONObject(0);\n        JSONObject meta = firstResult.optJSONObject(\"meta\");\n        JSONArray closes = extractCloseSeries(firstResult);\n\n        double lastClose = extractLastClose(closes);\n        double firstClose = extractFirstClose(closes);\n\n        JSONObject normalized = new JSONObject();\n        normalized.put(\"symbol\", meta.optString(\"symbol\", symbol));\n        normalized.put(\"name\", meta.optString(\"symbol\", symbol));\n        normalized.put(\"price\", lastClose);\n        normalized.put(\"change_percentage\", computeChangePercent(firstClose, lastClose));\n        normalized.put(\"closeSeries\", closes);\n\n        quoteCache.put(symbol, normalized);\n        return normalized;\n    }\n\n    private JSONObject requestYahooFinanceChart(String symbol, String range, String interval)\n            throws IOException, InterruptedException {\n        String response = apiClient.getYahooFinanceData(symbol, range, interval);\n        JSONObject root = new JSONObject(response);\n        JSONObject chart = root.optJSONObject(\"chart\");\n        if (chart == null) throw new IOException(\"Invalid Yahoo Finance response: missing 'chart'\");\n        return chart;\n    }\n\n    // ✅ FIXED STRUCTURE\n    private JSONArray extractCloseSeries(JSONObject chartResult) {\n        if (chartResult == null) return new JSONArray();\n\n        JSONObject indicators = chartResult.optJSONObject(\"indicators\");\n        if (indicators == null) return new JSONArray();\n\n        JSONArray quotes = indicators.optJSONArray(\"quote\");\n        if (quotes == null || quotes.isEmpty()) return new JSONArray();\n\n        JSONObject firstQuote = quotes.optJSONObject(0);\n        if (firstQuote == null) return new JSONArray();\n\n        JSONArray closes = firstQuote.optJSONArray(\"close\");\n        if (closes == null) return new JSONArray();\n\n        JSONArray sanitized = new JSONArray();\n        for (int i = 0; i < closes.length(); i++) {\n            double value = closes.optDouble(i, Double.NaN);\n            if (Double.isFinite(value)) sanitized.put(value);\n        }\n        return sanitized;\n    }\n\n    // --------------------------- ANALYTICS ---------------------------\n\n    private double fetchAnnualizedVolatility(Map<String, List<Double>> cache, String symbol) {\n        List<Double> prices = fetchHistoricalPrices(cache, symbol);\n        if (prices.size() < 2) return Double.NaN;\n\n        List<Double> logReturns = new ArrayList<>();\n        for (int i = 1; i < prices.size(); i++) {\n            double prev = prices.get(i - 1);\n            double curr = prices.get(i);\n            if (prev > 0 && curr > 0) logReturns.add(Math.log(curr / prev));\n        }\n\n        if (logReturns.size() < 2) return Double.NaN;\n\n        double mean = logReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);\n        double variance = logReturns.stream().mapToDouble(v -> Math.pow(v - mean, 2)).sum() / (logReturns.size() - 1);\n        return Math.sqrt(variance) * Math.sqrt(TRADING_DAYS_PER_YEAR);\n    }\n\n    private double fetchMomentum(Map<String, List<Double>> cache, String symbol) {\n        List<Double> prices = fetchHistoricalPrices(cache, symbol);\n        if (prices.size() < 2) return Double.NaN;\n\n        double oldest = prices.get(0);\n        double latest = prices.get(prices.size() - 1);\n        return (latest - oldest) / oldest;\n    }\n\n    private List<Double> fetchHistoricalPrices(Map<String, List<Double>> cache, String symbol) {\n        return cache.computeIfAbsent(symbol, s -> getHistoricalPrices(s, DEFAULT_HISTORY_PERIOD));\n    }\n\n    public List<Double> getHistoricalPrices(String symbol, String period) {\n        try {\n            JSONArray closes = fetchYahooHistoricalSeries(symbol, mapPeriodToRange(period), \"1d\");\n            List<Double> prices = new ArrayList<>();\n            for (int i = 0; i < closes.length(); i++) {\n                double val = closes.optDouble(i, Double.NaN);\n                if (Double.isFinite(val)) prices.add(val);\n            }\n            if (prices.size() < 2)\n                throw new IOException(\"Yahoo returned insufficient price points for \" + symbol);\n            return prices;\n        } catch (Exception e) {\n            System.err.println(\"Yahoo Finance history fetch failed for \" + symbol + \": \" + e.getMessage());\n            return Collections.emptyList();\n        }\n    }\n\n    private JSONArray fetchYahooHistoricalSeries(String symbol, String range, String interval)\n            throws IOException, InterruptedException {\n        JSONObject chart = requestYahooFinanceChart(symbol, range, interval);\n        JSONArray results = chart.optJSONArray(\"result\");\n        if (results == null || results.isEmpty())\n            throw new IOException(\"Yahoo Finance chart missing 'result'\");\n        JSONObject firstResult = results.optJSONObject(0);\n        return extractCloseSeries(firstResult);\n    }\n\n    // --------------------------- UTILS ---------------------------\n\n    private boolean isSuggestionSuitableForRisk(RiskProfile risk, StockSuggestion s) {\n        if (!Double.isFinite(s.volatility) || !Double.isFinite(s.momentum)) return false;\n        return switch (risk) {\n            case CONSERVATIVE -> s.volatility < 0.25 && s.momentum > 0.01;\n            case MODERATE -> s.volatility < 0.40 && s.momentum > -0.02;\n            case AGGRESSIVE -> s.momentum > -0.05;\n        };\n    }\n\n    private List<StockSuggestion> selectForRisk(RiskProfile risk, List<StockSuggestion> candidates) {\n        Comparator<StockSuggestion> comp = Comparator\n                .comparingDouble((StockSuggestion s) -> Math.abs(s.momentum))\n                .thenComparingDouble(s -> s.volatility);\n        return candidates.stream().sorted(comp.reversed()).limit(5).collect(Collectors.toList());\n    }\n\n    private double extractFirstClose(JSONArray closes) {\n        return closes != null && closes.length() > 0 ? closes.optDouble(0, Double.NaN) : Double.NaN;\n    }\n\n    private double extractLastClose(JSONArray closes) {\n        return closes != null && closes.length() > 0\n                ? closes.optDouble(closes.length() - 1, Double.NaN)\n                : Double.NaN;\n    }\n\n    private double computeChangePercent(double first, double last) {\n        if (!Double.isFinite(first) || !Double.isFinite(last) || first == 0) return Double.NaN;\n        return (last - first) / first;\n    }\n\n    private StockSuggestion mapYahooEntryToStockSuggestion(JSONObject stock) {\n        if (stock == null) return null;\n\n        String symbol = stock.optString(\"symbol\", \"\").trim();\n        if (symbol.isEmpty()) return null;\n\n        double price = stock.optDouble(\"price\", Double.NaN);\n        if (!Double.isFinite(price)) return null;\n\n        double percentChange = stock.optDouble(\"change_percentage\", Double.NaN);\n        if (!Double.isFinite(percentChange)) percentChange = 0d;\n\n        String name = stock.optString(\"name\", symbol);\n        return new StockSuggestion(name, symbol.toUpperCase(Locale.ROOT), price, percentChange);\n    }\n\n    private String mapPeriodToRange(String period) {\n        String normalized = period == null ? \"\" : period.trim().toLowerCase(Locale.ROOT);\n        return switch (normalized) {\n            case \"1m\" -> \"1mo\";\n            case \"3m\" -> \"3mo\";\n            case \"6m\" -> \"6mo\";\n            case \"1y\" -> \"1y\";\n            case \"5y\" -> \"5y\";\n            case \"max\" -> \"max\";\n            default -> \"1mo\";\n        };\n    }\n\n    // --------------------------- FALLBACK ---------------------------\n\n    private List<StockSuggestion> createFallbackSuggestions(RiskProfile risk) {\n        List<StockSuggestion> defaults = new ArrayList<>();\n        switch (risk) {\n            case CONSERVATIVE -> {\n                defaults.add(new StockSuggestion(\"HDFC Bank Ltd\", \"HDFCBANK.NS\", 1550.00, 0.45));\n                defaults.add(new StockSuggestion(\"Infosys Ltd\", \"INFY.NS\", 1405.00, 0.30));\n                defaults.add(new StockSuggestion(\"ITC Ltd\", \"ITC.NS\", 440.00, 0.25));\n            }\n            case MODERATE -> {\n                defaults.add(new StockSuggestion(\"Reliance Industries Ltd\", \"RELIANCE.NS\", 2435.00, 0.65));\n                defaults.add(new StockSuggestion(\"TCS\", \"TCS.NS\", 3550.00, 0.55));\n                defaults.add(new StockSuggestion(\"Larsen & Toubro\", \"LT.NS\", 3330.00, 0.75));\n            }\n            case AGGRESSIVE -> {\n                defaults.add(new StockSuggestion(\"Adani Enterprises\", \"ADANIENT.NS\", 2800.00, 1.25));\n                defaults.add(new StockSuggestion(\"Tata Motors\", \"TATAMOTORS.NS\", 720.00, 1.05));\n                defaults.add(new StockSuggestion(\"SBI\", \"SBIN.NS\", 570.00, 0.95));\n            }\n        }\n        return defaults;\n    }\n\n    private StockSuggestion findFallbackSuggestion(String symbol) {\n        if (symbol == null || symbol.isBlank()) return null;\n        String normalized = symbol.trim().toUpperCase(Locale.ROOT);\n        for (RiskProfile profile : RiskProfile.values()) {\n            for (StockSuggestion s : createFallbackSuggestions(profile)) {\n                if (normalized.equalsIgnoreCase(s.symbol)) return s;\n            }\n        }\n        return null;\n    }\n}\n",
+                    "language": "java"
+                },
+                "usedRules": [
+                    "zen-rules://user/custom"
+                ]
+            },
+            "createdAt": 1761070506565,
+            "isInternal": false,
+            "rawContent": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "/symbol/earning /symbol/price-history /symbol/fundamental-timeseries /symbol/fundamental /symbol/calendar /symbol/corporate-action /symbol/sustainability /symbol/upgrade-downgrade /symbol/insider-holder /market/etf /market/crypto /market/overview … etc endpoints of yahoo finance adjust the investment service accordingly"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "autoAppliedRules": [
+                {
+                    "name": "User AI Instruction",
+                    "description": "User AI Instruction",
+                    "uri": "zen-rules://user/custom",
+                    "content": "✅ Full Tech Stack for Your Smart Personal Finance & Investment Manager\nArea\tTechnologies\tPurpose\nCore Language\tJava 17+\tMain development\nUI\tJavaFX\tDesktop GUI\nData Storage\tSQLite (local), MySQL/PostgreSQL (cloud/web)\tPersist transactions, user data\nBuild Tool\tMaven or Gradle\tDependency management\nCharting\tJavaFX Charts or JFreeChart\tDashboard visualization\nAPI Calls\tJava HttpClient, Retrofit (optional)\tFetch stock/ETF data\nMachine Learning\tWeka or custom Java logic\tRisk profile analyzer\nPDF/CSV Export\tApache PDFBox / iText (PDF), OpenCSV\tFinancial report export\nAuthentication\tCustom login system (hashed passwords, Java Crypto), or Firebase/Auth0 (web version)\tSecure login\nNotifications\tJavaFX Alert, desktop notifications (java.awt.SystemTray)\tBudget/investment alerts\nScheduling\tScheduledExecutorService, Quartz Scheduler\tAuto data refresh, alerts\nOptional Web Version\tSpring Boot + Thymeleaf (or REST + React)\tIf you want to turn this into a web app later\n\n✅ Mapping Features to Technologies\n 1. User Authentication\nFeature\tTools\nSecure login/signup\tJavaFX form + hashed passwords (e.g., SHA-256 with salt)\nSession management\tStore current user ID/session info in memory or DB\n\n 2. Add/Edit/Delete Transactions\nFeature\tTools\nForm UI\tJavaFX\nStorage\tSQLite / MySQL\nDate input\tJavaFX DatePicker\n\n 3. Categorize Transactions\nFeature\tTools\nManual\tDropdown in JavaFX\nAuto\tKeyword mapping logic in Java\n\n 4. Dashboard with Charts\nFeature\tTools\nMonthly Spending / Income vs Expenses\tJavaFX LineChart / BarChart / PieChart\nSavings Growth\tLineChart with time series data\n\n 5. Budget Setup & Alerts\nFeature\tTools\nBudget input\tJavaFX input fields\nAlerts\tJavaFX Alert or tray popup using SystemTray\nAuto-check\tScheduledExecutorService to compare actual vs. budget regularly\n\n 6. Recurring Expense Handling\nFeature\tTools\nPattern recognition\tJava logic: group transactions by name/date interval\nAuto-categorization\tIdentify frequency (e.g., same vendor every 30 days)\n\n 7. Export to CSV / PDF\nFeature\tTools\nCSV\tOpenCSV\nPDF\tiText or Apache PDFBox\n\n Investment Features\n 1. AI-Based Risk Profile Analyzer\nFeature\tTools\nRisk quiz\tJavaFX form\nAnalysis\tJava logic or Weka ML model\nResult categories\tConservative, Moderate, Aggressive\n\n Store results for future recommendations.\n\n 2. Safe Stocks & ETF Recommender\nFeature\tTools\nData\tFinnhub API / Alpha Vantage\nFetching\tJava HttpClient, JSON parsing\nLogic\tFilter by market cap, beta, volume, dividend\nUI\tListView or CardView in JavaFX showing suggestions with short descriptions\n\n 3. Auto-Invest Planner\nFeature\tTools\nSurplus calculation\tTotal Income - Total Expense\nSuggestions\tRule-based logic based on risk profile\nUI\tMonthly suggestion popups or sidebar panel\n\n 4. \"Learn While You Invest\"\nFeature\tTools\nTips data\tJSON file or embedded DB table\nDisplay\tTooltips in JavaFX, or context-aware popups\n\n 5. Smart Alerts for Investment Opportunities\nFeature\tTools\nPolling\tScheduledExecutorService fetches API data\nConditions\te.g., \"Stock X dropped 5%\"\nAlerts\tJavaFX or SystemTray popup\nStorage\tSave alert history in SQLite\n\n Folder Structure Example\npgsql\nCopy\nEdit\ncom.smartfinance\n├── Main.java\n├── auth\n│   ├── LoginController.java\n│   └── RegisterController.java\n├── dashboard\n│   ├── DashboardController.java\n│   └── ChartUtils.java\n├── model\n│   ├── User.java\n│   ├── Transaction.java\n│   └── RiskProfile.java\n├── service\n│   ├── TransactionService.java\n│   ├── InvestmentService.java\n│   ├── RiskAnalyzer.java\n│   └── APIClient.java\n├── util\n│   ├── DatabaseHelper.java\n│   ├── CSVExporter.java\n│   └── PDFGenerator.java\n├── view\n│   ├── login.fxml\n│   ├── dashboard.fxml\n│   └── charts.fxml\n└── resources\n    ├── tips.json\n    └── application.properties\n Suggested Roadmap to Build\nPhase 1: Core Personal Finance\n User Auth (Login/Register)\n\n Add/Edit/Delete Transactions\n\n Categorize & Store Transactions\n\n Dashboard Charts\n\n Budget Setup & Alerts\n\nPhase 2: Advanced Automation\n Recurring Expense Detection\n\n Export to PDF/CSV\n\n Notifications via tray or in-app\n\nPhase 3: Investment Module\n Risk Profiler\n\n Safe Stock Recommender\n\n Auto-Invest Planner\n\n Investment Education Tips\n\n Real-time Alerts\n\n Tools & Libraries Summary\nArea\tTool\nUI\tJavaFX\nCharts\tJavaFX, JFreeChart\nData Storage\tSQLite, H2 (dev), MySQL (prod)\nAPI\tFinnhub, Alpha Vantage\nJSON\torg.json, Jackson, or Gson\nScheduling\tScheduledExecutorService\nCSV\tOpenCSV\nPDF\tiText, Apache PDFBox\nML\tWeka (risk analysis)\nAuthentication\tJava MessageDigest or bcrypt (JBCrypt)\nLogging\tSLF4J + Logback (make sure that these features are perfectly working)",
+                    "alwaysApply": true
+                }
+            ]
+        },
+        {
+            "id": "527c853a-4021-4a2e-939b-be60f82fb930",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "thought",
+                    "text": "**Checking repo rules file**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_04EecYDIQlFY8lbFEZoCgSqH",
+                    "statusText": "Viewed directory",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": ".zencoder",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/.zencoder"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_5Adg2e4AgoXYQo3Zq3raCRkV",
+                    "statusText": "Viewed file (lines 1:39)",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": ".zencoder/rules/repo.md",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/.zencoder/rules/repo.md"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Considering user intent**"
+                },
+                {
+                    "type": "text",
+                    "text": "# Clarification Needed\n\nI see details about Yahoo Finance endpoints and the current `InvestmentService`, but I don’t yet have a specific task from you. Could you let me know what you’d like me to do—e.g., update the service to use new endpoints, add a particular feature, investigate a bug, or something else?"
+                }
+            ],
+            "context": {
+                "author": "Code agent",
+                "operationId": "22456b2a-31fa-4453-a41d-d6c1d41eced8",
+                "usageStatistics": {
+                    "llmCallsUsedForAnswer": 3.0,
+                    "llmCallsUsedTotal": 25.0,
+                    "llmCallsLimit": 30.0,
+                    "limitRenewalMillisecondTimestamp": 1761116491448
+                }
+            },
+            "createdAt": 1761070511198,
+            "isInternal": false
+        },
+        {
+            "id": "b92f2bd0-47e6-470d-8ccf-779d18bfdb34",
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "yes use the new endpoints"
+                }
+            ],
+            "context": {
+                "currentFile": {
+                    "path": "src/main/java/com/smartfinance/service/InvestmentService.java",
+                    "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/service/InvestmentService.java",
+                    "sources": [
+                        "opened_tab"
+                    ],
+                    "content": "package com.smartfinance.service;\n\nimport com.smartfinance.Models.RiskProfile;\nimport org.json.JSONArray;\nimport org.json.JSONObject;\n\nimport java.io.IOException;\nimport java.util.*;\nimport java.util.stream.Collectors;\n\npublic class InvestmentService {\n\n    private static final int MAX_ACTIVE_SYMBOLS_TO_SCORE = 20;\n    private static final int MAX_TRENDING_SYMBOLS_TO_SCORE = 15;\n    private static final String DEFAULT_HISTORY_PERIOD = \"1M\";\n    private static final double TRADING_DAYS_PER_YEAR = 252d;\n\n    public static class StockSuggestion {\n        public String companyName;\n        public String symbol;\n        public double price;\n        public double percentChange;\n        public double volatility;\n        public double momentum;\n\n        public StockSuggestion(String companyName, String symbol, double price, double percentChange) {\n            this.companyName = companyName;\n            this.symbol = symbol;\n            this.price = price;\n            this.percentChange = percentChange;\n            this.volatility = Double.NaN;\n            this.momentum = Double.NaN;\n        }\n    }\n\n    private final APIClient apiClient;\n    private final Map<String, JSONObject> quoteCache = new HashMap<>();\n\n    public InvestmentService() {\n        this.apiClient = new APIClient();\n    }\n\n    // --------------------------- STOCK SUGGESTIONS ---------------------------\n\n    public List<StockSuggestion> getStockSuggestions(RiskProfile risk) {\n        List<StockSuggestion> suggestions = new ArrayList<>();\n        JSONArray data;\n\n        try {\n            data = fetchYahooTopMovers();\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch Yahoo Finance top movers: \" + e.getMessage());\n            return createFallbackSuggestions(risk);\n        }\n\n        if (data.isEmpty()) {\n            System.err.println(\"No live data available; using fallback for \" + risk + \".\");\n            return createFallbackSuggestions(risk);\n        }\n\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n        List<StockSuggestion> enriched = new ArrayList<>();\n\n        for (int i = 0; i < data.length() && enriched.size() < MAX_ACTIVE_SYMBOLS_TO_SCORE; i++) {\n            JSONObject stock = data.optJSONObject(i);\n            if (stock == null) continue;\n\n            StockSuggestion suggestion = mapYahooEntryToStockSuggestion(stock);\n            if (suggestion == null) continue;\n\n            suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n            suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n\n            if (isSuggestionSuitableForRisk(risk, suggestion)) {\n                enriched.add(suggestion);\n            }\n        }\n\n        suggestions.addAll(selectForRisk(risk, enriched));\n        if (suggestions.isEmpty()) suggestions.addAll(createFallbackSuggestions(risk));\n        return suggestions;\n    }\n\n    // --------------------------- TRENDING STOCKS ---------------------------\n\n    public List<StockSuggestion> getTrendingStocks() {\n        List<StockSuggestion> trending = new ArrayList<>();\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n\n        try {\n            JSONArray data = fetchYahooTopMovers();\n            for (int i = 0; i < data.length() && trending.size() < MAX_TRENDING_SYMBOLS_TO_SCORE; i++) {\n                JSONObject stock = data.optJSONObject(i);\n                if (stock == null) continue;\n\n                StockSuggestion suggestion = mapYahooEntryToStockSuggestion(stock);\n                if (suggestion == null) continue;\n\n                suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n                suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n                trending.add(suggestion);\n            }\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch trending stocks: \" + e.getMessage());\n            trending.addAll(createFallbackSuggestions(RiskProfile.MODERATE));\n        }\n\n        return trending;\n    }\n\n    // --------------------------- INDIVIDUAL STOCK ---------------------------\n\n    public StockSuggestion getStockDetails(String symbol) {\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n        try {\n            JSONObject quote = fetchYahooQuote(symbol);\n            StockSuggestion suggestion = mapYahooEntryToStockSuggestion(quote);\n            if (suggestion == null) return findFallbackSuggestion(symbol);\n\n            suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n            suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n            return suggestion;\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch Yahoo Finance details for \" + symbol + \": \" + e.getMessage());\n            return findFallbackSuggestion(symbol);\n        }\n    }\n\n    // --------------------------- YAHOO FINANCE FETCH ---------------------------\n\n    private JSONArray fetchYahooTopMovers() throws IOException, InterruptedException {\n        List<String> watchlist = List.of(\"RELIANCE.NS\", \"TCS.NS\", \"INFY.NS\", \"HDFCBANK.NS\", \"ITC.NS\");\n        JSONArray combined = new JSONArray();\n        Set<String> seen = new LinkedHashSet<>();\n\n        for (String symbol : watchlist) {\n            try {\n                JSONObject quote = fetchYahooQuote(symbol);\n                if (quote == null) continue;\n\n                String normalized = quote.optString(\"symbol\", symbol).toUpperCase(Locale.ROOT);\n                if (seen.add(normalized)) combined.put(quote);\n            } catch (Exception e) {\n                System.err.println(\"Skipping symbol \" + symbol + \": \" + e.getMessage());\n            }\n        }\n\n        return combined;\n    }\n\n    private JSONObject fetchYahooQuote(String symbol) throws IOException, InterruptedException {\n        if (symbol == null || symbol.isBlank())\n            throw new IOException(\"Symbol is required for Yahoo Finance quote\");\n\n        if (quoteCache.containsKey(symbol))\n            return quoteCache.get(symbol);\n\n        JSONObject chart = requestYahooFinanceChart(symbol, \"1mo\", \"1d\");\n        JSONArray results = chart.optJSONArray(\"result\");\n        if (results == null || results.isEmpty())\n            throw new IOException(\"Yahoo Finance chart missing 'result'\");\n\n        JSONObject firstResult = results.optJSONObject(0);\n        JSONObject meta = firstResult.optJSONObject(\"meta\");\n        JSONArray closes = extractCloseSeries(firstResult);\n\n        double lastClose = extractLastClose(closes);\n        double firstClose = extractFirstClose(closes);\n\n        JSONObject normalized = new JSONObject();\n        normalized.put(\"symbol\", meta.optString(\"symbol\", symbol));\n        normalized.put(\"name\", meta.optString(\"symbol\", symbol));\n        normalized.put(\"price\", lastClose);\n        normalized.put(\"change_percentage\", computeChangePercent(firstClose, lastClose));\n        normalized.put(\"closeSeries\", closes);\n\n        quoteCache.put(symbol, normalized);\n        return normalized;\n    }\n\n    private JSONObject requestYahooFinanceChart(String symbol, String range, String interval)\n            throws IOException, InterruptedException {\n        String response = apiClient.getYahooFinanceData(symbol, range, interval);\n        JSONObject root = new JSONObject(response);\n        JSONObject chart = root.optJSONObject(\"chart\");\n        if (chart == null) throw new IOException(\"Invalid Yahoo Finance response: missing 'chart'\");\n        return chart;\n    }\n\n    // ✅ FIXED STRUCTURE\n    private JSONArray extractCloseSeries(JSONObject chartResult) {\n        if (chartResult == null) return new JSONArray();\n\n        JSONObject indicators = chartResult.optJSONObject(\"indicators\");\n        if (indicators == null) return new JSONArray();\n\n        JSONArray quotes = indicators.optJSONArray(\"quote\");\n        if (quotes == null || quotes.isEmpty()) return new JSONArray();\n\n        JSONObject firstQuote = quotes.optJSONObject(0);\n        if (firstQuote == null) return new JSONArray();\n\n        JSONArray closes = firstQuote.optJSONArray(\"close\");\n        if (closes == null) return new JSONArray();\n\n        JSONArray sanitized = new JSONArray();\n        for (int i = 0; i < closes.length(); i++) {\n            double value = closes.optDouble(i, Double.NaN);\n            if (Double.isFinite(value)) sanitized.put(value);\n        }\n        return sanitized;\n    }\n\n    // --------------------------- ANALYTICS ---------------------------\n\n    private double fetchAnnualizedVolatility(Map<String, List<Double>> cache, String symbol) {\n        List<Double> prices = fetchHistoricalPrices(cache, symbol);\n        if (prices.size() < 2) return Double.NaN;\n\n        List<Double> logReturns = new ArrayList<>();\n        for (int i = 1; i < prices.size(); i++) {\n            double prev = prices.get(i - 1);\n            double curr = prices.get(i);\n            if (prev > 0 && curr > 0) logReturns.add(Math.log(curr / prev));\n        }\n\n        if (logReturns.size() < 2) return Double.NaN;\n\n        double mean = logReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);\n        double variance = logReturns.stream().mapToDouble(v -> Math.pow(v - mean, 2)).sum() / (logReturns.size() - 1);\n        return Math.sqrt(variance) * Math.sqrt(TRADING_DAYS_PER_YEAR);\n    }\n\n    private double fetchMomentum(Map<String, List<Double>> cache, String symbol) {\n        List<Double> prices = fetchHistoricalPrices(cache, symbol);\n        if (prices.size() < 2) return Double.NaN;\n\n        double oldest = prices.get(0);\n        double latest = prices.get(prices.size() - 1);\n        return (latest - oldest) / oldest;\n    }\n\n    private List<Double> fetchHistoricalPrices(Map<String, List<Double>> cache, String symbol) {\n        return cache.computeIfAbsent(symbol, s -> getHistoricalPrices(s, DEFAULT_HISTORY_PERIOD));\n    }\n\n    public List<Double> getHistoricalPrices(String symbol, String period) {\n        try {\n            JSONArray closes = fetchYahooHistoricalSeries(symbol, mapPeriodToRange(period), \"1d\");\n            List<Double> prices = new ArrayList<>();\n            for (int i = 0; i < closes.length(); i++) {\n                double val = closes.optDouble(i, Double.NaN);\n                if (Double.isFinite(val)) prices.add(val);\n            }\n            if (prices.size() < 2)\n                throw new IOException(\"Yahoo returned insufficient price points for \" + symbol);\n            return prices;\n        } catch (Exception e) {\n            System.err.println(\"Yahoo Finance history fetch failed for \" + symbol + \": \" + e.getMessage());\n            return Collections.emptyList();\n        }\n    }\n\n    private JSONArray fetchYahooHistoricalSeries(String symbol, String range, String interval)\n            throws IOException, InterruptedException {\n        JSONObject chart = requestYahooFinanceChart(symbol, range, interval);\n        JSONArray results = chart.optJSONArray(\"result\");\n        if (results == null || results.isEmpty())\n            throw new IOException(\"Yahoo Finance chart missing 'result'\");\n        JSONObject firstResult = results.optJSONObject(0);\n        return extractCloseSeries(firstResult);\n    }\n\n    // --------------------------- UTILS ---------------------------\n\n    private boolean isSuggestionSuitableForRisk(RiskProfile risk, StockSuggestion s) {\n        if (!Double.isFinite(s.volatility) || !Double.isFinite(s.momentum)) return false;\n        return switch (risk) {\n            case CONSERVATIVE -> s.volatility < 0.25 && s.momentum > 0.01;\n            case MODERATE -> s.volatility < 0.40 && s.momentum > -0.02;\n            case AGGRESSIVE -> s.momentum > -0.05;\n        };\n    }\n\n    private List<StockSuggestion> selectForRisk(RiskProfile risk, List<StockSuggestion> candidates) {\n        Comparator<StockSuggestion> comp = Comparator\n                .comparingDouble((StockSuggestion s) -> Math.abs(s.momentum))\n                .thenComparingDouble(s -> s.volatility);\n        return candidates.stream().sorted(comp.reversed()).limit(5).collect(Collectors.toList());\n    }\n\n    private double extractFirstClose(JSONArray closes) {\n        return closes != null && closes.length() > 0 ? closes.optDouble(0, Double.NaN) : Double.NaN;\n    }\n\n    private double extractLastClose(JSONArray closes) {\n        return closes != null && closes.length() > 0\n                ? closes.optDouble(closes.length() - 1, Double.NaN)\n                : Double.NaN;\n    }\n\n    private double computeChangePercent(double first, double last) {\n        if (!Double.isFinite(first) || !Double.isFinite(last) || first == 0) return Double.NaN;\n        return (last - first) / first;\n    }\n\n    private StockSuggestion mapYahooEntryToStockSuggestion(JSONObject stock) {\n        if (stock == null) return null;\n\n        String symbol = stock.optString(\"symbol\", \"\").trim();\n        if (symbol.isEmpty()) return null;\n\n        double price = stock.optDouble(\"price\", Double.NaN);\n        if (!Double.isFinite(price)) return null;\n\n        double percentChange = stock.optDouble(\"change_percentage\", Double.NaN);\n        if (!Double.isFinite(percentChange)) percentChange = 0d;\n\n        String name = stock.optString(\"name\", symbol);\n        return new StockSuggestion(name, symbol.toUpperCase(Locale.ROOT), price, percentChange);\n    }\n\n    private String mapPeriodToRange(String period) {\n        String normalized = period == null ? \"\" : period.trim().toLowerCase(Locale.ROOT);\n        return switch (normalized) {\n            case \"1m\" -> \"1mo\";\n            case \"3m\" -> \"3mo\";\n            case \"6m\" -> \"6mo\";\n            case \"1y\" -> \"1y\";\n            case \"5y\" -> \"5y\";\n            case \"max\" -> \"max\";\n            default -> \"1mo\";\n        };\n    }\n\n    // --------------------------- FALLBACK ---------------------------\n\n    private List<StockSuggestion> createFallbackSuggestions(RiskProfile risk) {\n        List<StockSuggestion> defaults = new ArrayList<>();\n        switch (risk) {\n            case CONSERVATIVE -> {\n                defaults.add(new StockSuggestion(\"HDFC Bank Ltd\", \"HDFCBANK.NS\", 1550.00, 0.45));\n                defaults.add(new StockSuggestion(\"Infosys Ltd\", \"INFY.NS\", 1405.00, 0.30));\n                defaults.add(new StockSuggestion(\"ITC Ltd\", \"ITC.NS\", 440.00, 0.25));\n            }\n            case MODERATE -> {\n                defaults.add(new StockSuggestion(\"Reliance Industries Ltd\", \"RELIANCE.NS\", 2435.00, 0.65));\n                defaults.add(new StockSuggestion(\"TCS\", \"TCS.NS\", 3550.00, 0.55));\n                defaults.add(new StockSuggestion(\"Larsen & Toubro\", \"LT.NS\", 3330.00, 0.75));\n            }\n            case AGGRESSIVE -> {\n                defaults.add(new StockSuggestion(\"Adani Enterprises\", \"ADANIENT.NS\", 2800.00, 1.25));\n                defaults.add(new StockSuggestion(\"Tata Motors\", \"TATAMOTORS.NS\", 720.00, 1.05));\n                defaults.add(new StockSuggestion(\"SBI\", \"SBIN.NS\", 570.00, 0.95));\n            }\n        }\n        return defaults;\n    }\n\n    private StockSuggestion findFallbackSuggestion(String symbol) {\n        if (symbol == null || symbol.isBlank()) return null;\n        String normalized = symbol.trim().toUpperCase(Locale.ROOT);\n        for (RiskProfile profile : RiskProfile.values()) {\n            for (StockSuggestion s : createFallbackSuggestions(profile)) {\n                if (normalized.equalsIgnoreCase(s.symbol)) return s;\n            }\n        }\n        return null;\n    }\n}\n",
+                    "language": "java"
+                },
+                "usedRules": [
+                    "zen-rules://user/custom"
+                ]
+            },
+            "createdAt": 1761070726510,
+            "isInternal": false,
+            "rawContent": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "yes use the new endpoints "
+                            }
+                        ]
+                    }
+                ]
+            },
+            "autoAppliedRules": []
+        },
+        {
+            "id": "08a36717-9843-4015-a35f-f289d0cb7436",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "thought",
+                    "text": "**Reviewing APIClient for endpoint integration**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_Ea7LAFym3WpKeXy8OVFa38o1",
+                    "statusText": "Viewed file (lines 1:120)",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": "src/main/java/com/smartfinance/service/APIClient.java",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/service/APIClient.java"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Planning API client updates**\n\nI'm looking into adding new endpoints like /symbol/earning and /market/overview to the InvestmentService. I'll need to check how the current APIClient works, whether it hits Yahoo Finance or another base URL, and adapt it to handle these new paths to fetch expanded market data. Let's explore how these endpoints fit into the existing structure and what adjustments are needed."
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_rtGLow0ajenSuKPe3wkaR2es",
+                    "title": "Fulltext search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_g4I585DBvBJqEnLbBe22B5QR",
+                    "title": "Fulltext search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_VGSEl6ENxihhpFGj5yBgEyvX",
+                    "title": "Fulltext search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Planning APIClient updates**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_JPvlrFqOVBZJ6vZuNjeB5K7J",
+                    "statusText": "Viewed file (lines 1:371)",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": "src/main/java/com/smartfinance/service/InvestmentService.java",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/service/InvestmentService.java"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Extending file view for full coverage**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_ZhY61OSU2slh2uOUGB1mMmb7",
+                    "statusText": "Viewed file (line 320 and onwards)",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": "src/main/java/com/smartfinance/service/InvestmentService.java",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/service/InvestmentService.java"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_7e38fK69QuZhENlQwRIfelga",
+                    "title": "File search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Planning APIClient and InvestmentService updates**\n\nI’m sorting through how to switch APIClient and InvestmentService to new Yahoo Finance–style endpoints like /symbol/price-history and /symbol/earning. Since the user’s instructions hint at a different base or aggregator API, I’m trying to piece together the right URLs and response structures before rewriting methods to fetch and handle this data properly."
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_JasjEqxi68kVZdUObzr43HMc",
+                    "title": "Fulltext search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_EvZlu5CjGbhgvk60OJzLBTvS",
+                    "title": "Fulltext search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_bjmTNKoy1rCDsPa7FDBB9Xq6",
+                    "title": "Fulltext search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Outlining API integration updates**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_9kLndbNGNd5X2zXhoPe8yo8B",
+                    "statusText": "Requirements collected",
+                    "status": "SUCCESS",
+                    "isHidden": false,
+                    "localResult": "{\"answers\":{\"Which of the new Yahoo Finance endpoints should power each feature (suggestions, trending list, individual stock)?\":\"all\",\"Do you still want price history data pulled from Yahoo, or can we rely on another provider?\":\"Use Yahoo Finance endpoints\"}}"
+                },
+                {
+                    "type": "requirementsTool",
+                    "id": "a979a26a-06e8-485e-a0ba-d189fab9632a",
+                    "questions": [
+                        {
+                            "question": "Which of the new Yahoo Finance endpoints should power each feature (suggestions, trending list, individual stock)?",
+                            "options": [
+                                "/symbol/price-history",
+                                "/symbol/fundamental",
+                                "/market/overview"
+                            ]
+                        },
+                        {
+                            "question": "Do you still want price history data pulled from Yahoo, or can we rely on another provider?",
+                            "options": [
+                                "Use Yahoo Finance endpoints",
+                                "Keep existing chart endpoint",
+                                "Either source is fine"
+                            ]
+                        }
+                    ],
+                    "toolCallId": "call_9kLndbNGNd5X2zXhoPe8yo8B",
+                    "answers": {
+                        "Which of the new Yahoo Finance endpoints should power each feature (suggestions, trending list, individual stock)?": "all",
+                        "Do you still want price history data pulled from Yahoo, or can we rely on another provider?": "Use Yahoo Finance endpoints"
+                    },
+                    "status": "SUCCESS"
+                }
+            ],
+            "context": {
+                "author": "Code agent",
+                "operationId": "5dceaec5-a01a-4fae-8624-4f3096cccb4e"
+            },
+            "createdAt": 1761070730085,
+            "isInternal": false
+        },
+        {
+            "id": "9f38bde9-8173-4394-a846-94df525335c1",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "thought",
+                    "text": "**Planning integration of new Yahoo endpoints**\n\nI’m working on figuring out how to adapt the service to use all the new Yahoo Finance endpoints the user mentioned. I need to understand the exact API URLs, response structures, and whether the codebase already references any new base URL like yfapi or query2.finance.yahoo.com. Since documentation might be missing, I’m considering searching the repo for clues or examples of similar usage to confidently update the API client and ensure these endpoints fit well into the existing system."
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_Hxgio9tsvRkSizCbJS3dynpr",
+                    "title": "Fulltext search",
+                    "statusText": "Done",
+                    "status": "SUCCESS",
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_DwBWMRhFC4SaR4zPHqwbKcUn",
+                    "statusText": "Viewed file (lines 1:110)",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": "pom.xml",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/pom.xml"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_dPaoKvzNEddRTVha3S2nIBhZ",
+                    "statusText": "Viewed directory",
+                    "status": "SUCCESS",
+                    "context": {
+                        "files": [
+                            {
+                                "path": "src/main/java/com/smartfinance/service",
+                                "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/service"
+                            }
+                        ]
+                    },
+                    "isHidden": false
+                },
+                {
+                    "type": "thought",
+                    "text": "**Clarifying API base URL****Considering clarifying questions**"
+                },
+                {
+                    "type": "toolCall",
+                    "toolCallId": "call_VwtwrhyOjXvIopJxL6IguqhI",
+                    "statusText": "Requirements collected",
+                    "status": "SUCCESS",
+                    "isHidden": false,
+                    "localResult": "{\"answers\":{\"What base URL and headers should we use for the new Yahoo Finance endpoints?\":\"https://yfapi.net (requires x-api-key)\",\"Which data fields are mandatory for each suggestion (e.g., dividend yield, PE ratio)?\":\"Keep current fields (price, change %, volatility, momentum)\",\"Should we cache responses from the new endpoints similar to the existing quote cache?\":\"Yes, keep caching\"}}"
+                },
+                {
+                    "type": "requirementsTool",
+                    "id": "17926d01-84be-432b-88f9-0e9f69f951ef",
+                    "questions": [
+                        {
+                            "question": "What base URL and headers should we use for the new Yahoo Finance endpoints?",
+                            "options": [
+                                "https://yfapi.net (requires x-api-key)",
+                                "https://query2.finance.yahoo.com (no key)",
+                                "Custom (please specify)"
+                            ]
+                        },
+                        {
+                            "question": "Which data fields are mandatory for each suggestion (e.g., dividend yield, PE ratio)?",
+                            "options": [
+                                "Keep current fields (price, change %, volatility, momentum)",
+                                "Add fundamentals (PE, EPS, etc.)",
+                                "Add sustainability/ESG data"
+                            ]
+                        },
+                        {
+                            "question": "Should we cache responses from the new endpoints similar to the existing quote cache?",
+                            "options": [
+                                "Yes, keep caching",
+                                "No, fetch fresh every time"
+                            ]
+                        }
+                    ],
+                    "toolCallId": "call_VwtwrhyOjXvIopJxL6IguqhI",
+                    "answers": {
+                        "What base URL and headers should we use for the new Yahoo Finance endpoints?": "https://yfapi.net (requires x-api-key)",
+                        "Which data fields are mandatory for each suggestion (e.g., dividend yield, PE ratio)?": "Keep current fields (price, change %, volatility, momentum)",
+                        "Should we cache responses from the new endpoints similar to the existing quote cache?": "Yes, keep caching"
+                    },
+                    "status": "SUCCESS"
+                }
+            ],
+            "context": {
+                "author": "Code agent",
+                "operationId": "f934119b-8e02-4705-9c41-0b86148fa5e4"
+            },
+            "createdAt": 1761070860612,
+            "isInternal": false
+        },
+        {
+            "id": "19a6a8d7-5e67-471a-b7f5-6ba1151f5d71",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "thought",
+                    "text": "**Preparing for API integration**"
+                },
+                {
+                    "type": "text",
+                    "text": "# API Key Needed\n\nI can switch our `Service` toInvestment the `https://apiyf.net endpoints`, but those calls require an `x-api-key`. Could you provide the Yahoo Finance API key (safe to redact before sharing), or let me know where it’s stored so I can plug it in?"
+                }
+            ],
+            "context": {
+                "author": "Code agent",
+                "operationId": "22fbbd14-97e4-483f-8244-df36413bcff1",
+                "usageStatistics": {
+                    "llmCallsUsedForAnswer": 16.0,
+                    "llmCallsUsedTotal": 41.0,
+                    "llmCallsLimit": 30.0,
+                    "limitRenewalMillisecondTimestamp": 1761116491911
+                }
+            },
+            "createdAt": 1761071460298,
+            "isInternal": false
+        },
+        {
+            "id": "1e8e1462-0830-4e6a-b244-14a223fd8763",
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "yes"
+                }
+            ],
+            "context": {
+                "currentFile": {
+                    "path": "src/main/java/com/smartfinance/service/InvestmentService.java",
+                    "fsPath": "C:/Users/ashis/OneDrive/Documents/GitHub/wealthwise final old/src/main/java/com/smartfinance/service/InvestmentService.java",
+                    "sources": [
+                        "opened_tab"
+                    ],
+                    "content": "package com.smartfinance.service;\n\nimport com.smartfinance.Models.RiskProfile;\nimport org.json.JSONArray;\nimport org.json.JSONObject;\n\nimport java.io.IOException;\nimport java.util.*;\nimport java.util.stream.Collectors;\n\npublic class InvestmentService {\n\n    private static final int MAX_ACTIVE_SYMBOLS_TO_SCORE = 20;\n    private static final int MAX_TRENDING_SYMBOLS_TO_SCORE = 15;\n    private static final String DEFAULT_HISTORY_PERIOD = \"1M\";\n    private static final double TRADING_DAYS_PER_YEAR = 252d;\n\n    public static class StockSuggestion {\n        public String companyName;\n        public String symbol;\n        public double price;\n        public double percentChange;\n        public double volatility;\n        public double momentum;\n\n        public StockSuggestion(String companyName, String symbol, double price, double percentChange) {\n            this.companyName = companyName;\n            this.symbol = symbol;\n            this.price = price;\n            this.percentChange = percentChange;\n            this.volatility = Double.NaN;\n            this.momentum = Double.NaN;\n        }\n    }\n\n    private final APIClient apiClient;\n    private final Map<String, JSONObject> quoteCache = new HashMap<>();\n\n    public InvestmentService() {\n        this.apiClient = new APIClient();\n    }\n\n    // --------------------------- STOCK SUGGESTIONS ---------------------------\n\n    public List<StockSuggestion> getStockSuggestions(RiskProfile risk) {\n        List<StockSuggestion> suggestions = new ArrayList<>();\n        JSONArray data;\n\n        try {\n            data = fetchYahooTopMovers();\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch Yahoo Finance top movers: \" + e.getMessage());\n            return createFallbackSuggestions(risk);\n        }\n\n        if (data.isEmpty()) {\n            System.err.println(\"No live data available; using fallback for \" + risk + \".\");\n            return createFallbackSuggestions(risk);\n        }\n\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n        List<StockSuggestion> enriched = new ArrayList<>();\n\n        for (int i = 0; i < data.length() && enriched.size() < MAX_ACTIVE_SYMBOLS_TO_SCORE; i++) {\n            JSONObject stock = data.optJSONObject(i);\n            if (stock == null) continue;\n\n            StockSuggestion suggestion = mapYahooEntryToStockSuggestion(stock);\n            if (suggestion == null) continue;\n\n            suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n            suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n\n            if (isSuggestionSuitableForRisk(risk, suggestion)) {\n                enriched.add(suggestion);\n            }\n        }\n\n        suggestions.addAll(selectForRisk(risk, enriched));\n        if (suggestions.isEmpty()) suggestions.addAll(createFallbackSuggestions(risk));\n        return suggestions;\n    }\n\n    // --------------------------- TRENDING STOCKS ---------------------------\n\n    public List<StockSuggestion> getTrendingStocks() {\n        List<StockSuggestion> trending = new ArrayList<>();\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n\n        try {\n            JSONArray data = fetchYahooTopMovers();\n            for (int i = 0; i < data.length() && trending.size() < MAX_TRENDING_SYMBOLS_TO_SCORE; i++) {\n                JSONObject stock = data.optJSONObject(i);\n                if (stock == null) continue;\n\n                StockSuggestion suggestion = mapYahooEntryToStockSuggestion(stock);\n                if (suggestion == null) continue;\n\n                suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n                suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n                trending.add(suggestion);\n            }\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch trending stocks: \" + e.getMessage());\n            trending.addAll(createFallbackSuggestions(RiskProfile.MODERATE));\n        }\n\n        return trending;\n    }\n\n    // --------------------------- INDIVIDUAL STOCK ---------------------------\n\n    public StockSuggestion getStockDetails(String symbol) {\n        Map<String, List<Double>> historicalCache = new HashMap<>();\n        try {\n            JSONObject quote = fetchYahooQuote(symbol);\n            StockSuggestion suggestion = mapYahooEntryToStockSuggestion(quote);\n            if (suggestion == null) return findFallbackSuggestion(symbol);\n\n            suggestion.volatility = fetchAnnualizedVolatility(historicalCache, suggestion.symbol);\n            suggestion.momentum = fetchMomentum(historicalCache, suggestion.symbol);\n            return suggestion;\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch Yahoo Finance details for \" + symbol + \": \" + e.getMessage());\n            return findFallbackSuggestion(symbol);\n        }\n    }\n\n    // --------------------------- YAHOO FINANCE FETCH ---------------------------\n\n    private JSONArray fetchYahooTopMovers() throws IOException, InterruptedException {\n        List<String> watchlist = List.of(\"RELIANCE.NS\", \"TCS.NS\", \"INFY.NS\", \"HDFCBANK.NS\", \"ITC.NS\");\n        JSONArray combined = new JSONArray();\n        Set<String> seen = new LinkedHashSet<>();\n\n        for (String symbol : watchlist) {\n            try {\n                JSONObject quote = fetchYahooQuote(symbol);\n                if (quote == null) continue;\n\n                String normalized = quote.optString(\"symbol\", symbol).toUpperCase(Locale.ROOT);\n                if (seen.add(normalized)) combined.put(quote);\n            } catch (Exception e) {\n                System.err.println(\"Skipping symbol \" + symbol + \": \" + e.getMessage());\n            }\n        }\n\n        return combined;\n    }\n\n    private JSONObject fetchYahooQuote(String symbol) throws IOException, InterruptedException {\n        if (symbol == null || symbol.isBlank())\n            throw new IOException(\"Symbol is required for Yahoo Finance quote\");\n\n        if (quoteCache.containsKey(symbol))\n            return quoteCache.get(symbol);\n\n        JSONObject chart = requestYahooFinanceChart(symbol, \"1mo\", \"1d\");\n        JSONArray results = chart.optJSONArray(\"result\");\n        if (results == null || results.isEmpty())\n            throw new IOException(\"Yahoo Finance chart missing 'result'\");\n\n        JSONObject firstResult = results.optJSONObject(0);\n        JSONObject meta = firstResult.optJSONObject(\"meta\");\n        JSONArray closes = extractCloseSeries(firstResult);\n\n        double lastClose = extractLastClose(closes);\n        double firstClose = extractFirstClose(closes);\n\n        JSONObject normalized = new JSONObject();\n        normalized.put(\"symbol\", meta.optString(\"symbol\", symbol));\n        normalized.put(\"name\", meta.optString(\"symbol\", symbol));\n        normalized.put(\"price\", lastClose);\n        normalized.put(\"change_percentage\", computeChangePercent(firstClose, lastClose));\n        normalized.put(\"closeSeries\", closes);\n\n        quoteCache.put(symbol, normalized);\n        return normalized;\n    }\n\n    private JSONObject requestYahooFinanceChart(String symbol, String range, String interval)\n            throws IOException, InterruptedException {\n        String response = apiClient.getYahooFinanceData(symbol, range, interval);\n        JSONObject root = new JSONObject(response);\n        JSONObject chart = root.optJSONObject(\"chart\");\n        if (chart == null) throw new IOException(\"Invalid Yahoo Finance response: missing 'chart'\");\n        return chart;\n    }\n\n    // ✅ FIXED STRUCTURE\n    private JSONArray extractCloseSeries(JSONObject chartResult) {\n        if (chartResult == null) return new JSONArray();\n\n        JSONObject indicators = chartResult.optJSONObject(\"indicators\");\n        if (indicators == null) return new JSONArray();\n\n        JSONArray quotes = indicators.optJSONArray(\"quote\");\n        if (quotes == null || quotes.isEmpty()) return new JSONArray();\n\n        JSONObject firstQuote = quotes.optJSONObject(0);\n        if (firstQuote == null) return new JSONArray();\n\n        JSONArray closes = firstQuote.optJSONArray(\"close\");\n        if (closes == null) return new JSONArray();\n\n        JSONArray sanitized = new JSONArray();\n        for (int i = 0; i < closes.length(); i++) {\n            double value = closes.optDouble(i, Double.NaN);\n            if (Double.isFinite(value)) sanitized.put(value);\n        }\n        return sanitized;\n    }\n\n    // --------------------------- ANALYTICS ---------------------------\n\n    private double fetchAnnualizedVolatility(Map<String, List<Double>> cache, String symbol) {\n        List<Double> prices = fetchHistoricalPrices(cache, symbol);\n        if (prices.size() < 2) return Double.NaN;\n\n        List<Double> logReturns = new ArrayList<>();\n        for (int i = 1; i < prices.size(); i++) {\n            double prev = prices.get(i - 1);\n            double curr = prices.get(i);\n            if (prev > 0 && curr > 0) logReturns.add(Math.log(curr / prev));\n        }\n\n        if (logReturns.size() < 2) return Double.NaN;\n\n        double mean = logReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);\n        double variance = logReturns.stream().mapToDouble(v -> Math.pow(v - mean, 2)).sum() / (logReturns.size() - 1);\n        return Math.sqrt(variance) * Math.sqrt(TRADING_DAYS_PER_YEAR);\n    }\n\n    private double fetchMomentum(Map<String, List<Double>> cache, String symbol) {\n        List<Double> prices = fetchHistoricalPrices(cache, symbol);\n        if (prices.size() < 2) return Double.NaN;\n\n        double oldest = prices.get(0);\n        double latest = prices.get(prices.size() - 1);\n        return (latest - oldest) / oldest;\n    }\n\n    private List<Double> fetchHistoricalPrices(Map<String, List<Double>> cache, String symbol) {\n        return cache.computeIfAbsent(symbol, s -> getHistoricalPrices(s, DEFAULT_HISTORY_PERIOD));\n    }\n\n    public List<Double> getHistoricalPrices(String symbol, String period) {\n        try {\n            JSONArray closes = fetchYahooHistoricalSeries(symbol, mapPeriodToRange(period), \"1d\");\n            List<Double> prices = new ArrayList<>();\n            for (int i = 0; i < closes.length(); i++) {\n                double val = closes.optDouble(i, Double.NaN);\n                if (Double.isFinite(val)) prices.add(val);\n            }\n            if (prices.size() < 2)\n                throw new IOException(\"Yahoo returned insufficient price points for \" + symbol);\n            return prices;\n        } catch (Exception e) {\n            System.err.println(\"Yahoo Finance history fetch failed for \" + symbol + \": \" + e.getMessage());\n            return Collections.emptyList();\n        }\n    }\n\n    private JSONArray fetchYahooHistoricalSeries(String symbol, String range, String interval)\n            throws IOException, InterruptedException {\n        JSONObject chart = requestYahooFinanceChart(symbol, range, interval);\n        JSONArray results = chart.optJSONArray(\"result\");\n        if (results == null || results.isEmpty())\n            throw new IOException(\"Yahoo Finance chart missing 'result'\");\n        JSONObject firstResult = results.optJSONObject(0);\n        return extractCloseSeries(firstResult);\n    }\n\n    // --------------------------- UTILS ---------------------------\n\n    private boolean isSuggestionSuitableForRisk(RiskProfile risk, StockSuggestion s) {\n        if (!Double.isFinite(s.volatility) || !Double.isFinite(s.momentum)) return false;\n        return switch (risk) {\n            case CONSERVATIVE -> s.volatility < 0.25 && s.momentum > 0.01;\n            case MODERATE -> s.volatility < 0.40 && s.momentum > -0.02;\n            case AGGRESSIVE -> s.momentum > -0.05;\n        };\n    }\n\n    private List<StockSuggestion> selectForRisk(RiskProfile risk, List<StockSuggestion> candidates) {\n        Comparator<StockSuggestion> comp = Comparator\n                .comparingDouble((StockSuggestion s) -> Math.abs(s.momentum))\n                .thenComparingDouble(s -> s.volatility);\n        return candidates.stream().sorted(comp.reversed()).limit(5).collect(Collectors.toList());\n    }\n\n    private double extractFirstClose(JSONArray closes) {\n        return closes != null && closes.length() > 0 ? closes.optDouble(0, Double.NaN) : Double.NaN;\n    }\n\n    private double extractLastClose(JSONArray closes) {\n        return closes != null && closes.length() > 0\n                ? closes.optDouble(closes.length() - 1, Double.NaN)\n                : Double.NaN;\n    }\n\n    private double computeChangePercent(double first, double last) {\n        if (!Double.isFinite(first) || !Double.isFinite(last) || first == 0) return Double.NaN;\n        return (last - first) / first;\n    }\n\n    private StockSuggestion mapYahooEntryToStockSuggestion(JSONObject stock) {\n        if (stock == null) return null;\n\n        String symbol = stock.optString(\"symbol\", \"\").trim();\n        if (symbol.isEmpty()) return null;\n\n        double price = stock.optDouble(\"price\", Double.NaN);\n        if (!Double.isFinite(price)) return null;\n\n        double percentChange = stock.optDouble(\"change_percentage\", Double.NaN);\n        if (!Double.isFinite(percentChange)) percentChange = 0d;\n\n        String name = stock.optString(\"name\", symbol);\n        return new StockSuggestion(name, symbol.toUpperCase(Locale.ROOT), price, percentChange);\n    }\n\n    private String mapPeriodToRange(String period) {\n        String normalized = period == null ? \"\" : period.trim().toLowerCase(Locale.ROOT);\n        return switch (normalized) {\n            case \"1m\" -> \"1mo\";\n            case \"3m\" -> \"3mo\";\n            case \"6m\" -> \"6mo\";\n            case \"1y\" -> \"1y\";\n            case \"5y\" -> \"5y\";\n            case \"max\" -> \"max\";\n            default -> \"1mo\";\n        };\n    }\n\n    // --------------------------- FALLBACK ---------------------------\n\n    private List<StockSuggestion> createFallbackSuggestions(RiskProfile risk) {\n        List<StockSuggestion> defaults = new ArrayList<>();\n        switch (risk) {\n            case CONSERVATIVE -> {\n                defaults.add(new StockSuggestion(\"HDFC Bank Ltd\", \"HDFCBANK.NS\", 1550.00, 0.45));\n                defaults.add(new StockSuggestion(\"Infosys Ltd\", \"INFY.NS\", 1405.00, 0.30));\n                defaults.add(new StockSuggestion(\"ITC Ltd\", \"ITC.NS\", 440.00, 0.25));\n            }\n            case MODERATE -> {\n                defaults.add(new StockSuggestion(\"Reliance Industries Ltd\", \"RELIANCE.NS\", 2435.00, 0.65));\n                defaults.add(new StockSuggestion(\"TCS\", \"TCS.NS\", 3550.00, 0.55));\n                defaults.add(new StockSuggestion(\"Larsen & Toubro\", \"LT.NS\", 3330.00, 0.75));\n            }\n            case AGGRESSIVE -> {\n                defaults.add(new StockSuggestion(\"Adani Enterprises\", \"ADANIENT.NS\", 2800.00, 1.25));\n                defaults.add(new StockSuggestion(\"Tata Motors\", \"TATAMOTORS.NS\", 720.00, 1.05));\n                defaults.add(new StockSuggestion(\"SBI\", \"SBIN.NS\", 570.00, 0.95));\n            }\n        }\n        return defaults;\n    }\n\n    private StockSuggestion findFallbackSuggestion(String symbol) {\n        if (symbol == null || symbol.isBlank()) return null;\n        String normalized = symbol.trim().toUpperCase(Locale.ROOT);\n        for (RiskProfile profile : RiskProfile.values()) {\n            for (StockSuggestion s : createFallbackSuggestions(profile)) {\n                if (normalized.equalsIgnoreCase(s.symbol)) return s;\n            }\n        }\n        return null;\n    }\n}\n",
+                    "language": "java"
+                },
+                "usedRules": [
+                    "zen-rules://user/custom"
+                ]
+            },
+            "createdAt": 1761071481028,
+            "isInternal": false,
+            "rawContent": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "yes"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "autoAppliedRules": []
+        },
+        {
+            "id": "8197fa95-b9b0-40aa-879d-3c74afcd4ac2",
+            "role": "system",
+            "content": [
+                {
+                    "type": "errorText",
+                    "text": "",
+                    "title": "You've hit your plan usage limits",
+                    "actions": [
+                        {
+                            "type": "upgradePlan",
+                            "title": "Upgrade plan",
+                            "waitSeconds": 45018
+                        },
+                        {
+                            "type": "externalAction",
+                            "title": "Try Again",
+                            "action": "regenerateLastAnswer"
+                        }
+                    ]
+                }
+            ],
+            "createdAt": 1761071488625,
+            "isInternal": false
+        }
+    ],
+    "isAgent": true,
+    "isNameGenerated": true,
+    "isCustomAgent": false,
+    "isUnitTestsAgent": false,
+    "isE2EAgent": false,
+    "isWebDevAgent": false,
+    "isQnaAgent": false,
+    "isRepoInfoAgent": false,
+    "model": "default"
+}
+}

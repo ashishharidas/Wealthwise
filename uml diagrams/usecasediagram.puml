@@ -1,0 +1,112 @@
+@startuml SmartFinance Use Case Diagram
+
+skinparam actorStyle awesome
+skinparam packageStyle rectangle
+skinparam usecase {
+    BackgroundColor #E8F5E9
+    BorderColor #4CAF50
+    FontSize 11
+}
+
+left to right direction
+scale 0.9
+
+actor "Admin" as admin
+actor "Client" as client
+
+rectangle "SmartFinance System" {
+    
+    package "Authentication" {
+        usecase "Login" as UC1
+        usecase "Logout" as UC2
+    }
+    
+    package "Admin Management" {
+        usecase "View All Clients" as UC3
+        usecase "Create New Client" as UC4
+        usecase "View Client Details" as UC5
+        usecase "Reports Management" as UC6
+        usecase "Manage Client Accounts" as UC8
+    }
+    
+    package "Client Account Management" {
+        usecase "View Dashboard" as UC9
+        usecase "Manage Profile" as UC10
+        usecase "View Account Balance" as UC11
+    }
+    
+    package "Transaction Management" {
+        usecase "Create Transaction" as UC14
+        usecase "View Transactions" as UC15
+        usecase "Categorize Transaction" as UC16
+        usecase "View Transaction History" as UC17
+    }
+    
+    package "Budget Management" {
+        usecase "Create Budget" as UC18
+        usecase "View Budget" as UC19
+        usecase "Update Budget" as UC20
+        usecase "Track Spending" as UC21
+    }
+    
+    package "Investment Management" {
+        usecase "View Investment Options" as UC22
+        usecase "Check Risk Profile" as UC25
+        usecase "Get Investment Advice" as UC26
+    }
+    
+    package "Reporting" {
+        usecase "Generate Client Reports" as UC27
+        usecase "View Financial Summary" as UC28
+        usecase "Export Reports" as UC29
+    }
+}
+
+' External System
+actor "External Investment API" as api
+
+' Admin relationships
+admin --> UC1
+admin --> UC2
+admin --> UC3
+admin --> UC4
+admin --> UC5
+admin --> UC6
+admin --> UC8
+
+' Client relationships
+client --> UC1
+client --> UC2
+client --> UC9
+client --> UC10
+client --> UC11
+client --> UC14
+client --> UC15
+client --> UC16
+client --> UC17
+client --> UC18
+client --> UC19
+client --> UC20
+client --> UC21
+client --> UC22
+client --> UC25
+client --> UC26
+client --> UC27
+client --> UC28
+client --> UC29
+
+' Include relationships
+UC9 ..> UC11 : <<include>>
+UC9 ..> UC17 : <<include>>
+UC14 ..> UC16 : <<include>>
+UC18 ..> UC21 : <<include>>
+
+' Extend relationships
+UC29 ..> UC27 : <<extend>>
+UC29 ..> UC28 : <<extend>>
+
+' External API relationship
+UC22 --> api
+UC26 --> api
+
+@enduml
