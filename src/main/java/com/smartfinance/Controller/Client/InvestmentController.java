@@ -11,6 +11,7 @@ import javafx.scene.chart.XYChart;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.VBox;
+import javafx.scene.text.Font;
 import javafx.scene.text.Text;
 
 import java.net.URL;
@@ -43,15 +44,13 @@ public class InvestmentController implements Initializable {
             loadRecommendations(RiskProfile.valueOf(investment_type_choicebox.getValue()));
         }
 
-        // ✅ Add listener to reload recommendations on profile change
+        // ✅ Listener for profile change
         investment_type_choicebox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
             if (newValue != null) {
                 loadRecommendations(RiskProfile.valueOf(newValue));
             }
         });
     }
-
-
 
     private void loadRecommendations(RiskProfile riskProfile) {
         recommendations_container.getChildren().clear();
@@ -62,34 +61,48 @@ public class InvestmentController implements Initializable {
     }
 
     private VBox createStockContainer(StockSuggestion sug) {
-        VBox container = new VBox(5);
+        VBox container = new VBox(8);
         container.setStyle("""
             -fx-background-color: #f8f9fa;
-            -fx-padding: 10;
-            -fx-background-radius: 8;
-            -fx-border-color: #e9ecef;
-            -fx-border-radius: 8;
+            -fx-padding: 14;
+            -fx-background-radius: 10;
+            -fx-border-color: #dee2e6;
+            -fx-border-radius: 10;
             -fx-border-width: 1;
         """);
+        container.setPrefWidth(440);  // ✅ Wider container
+        container.setPrefHeight(260); // ✅ Taller container
 
         Text nameText = new Text(sug.companyName);
-        nameText.setStyle("-fx-font-size: 14px; -fx-font-weight: bold; -fx-fill: #2c3e50;");
+        nameText.setStyle("-fx-font-size: 10px; -fx-font-weight: bold; -fx-fill: #2c3e50;");
 
         Text priceText = new Text("Price: ₹" + String.format("%.2f", sug.price));
-        priceText.setStyle("-fx-font-size: 12px; -fx-fill: #6c757d;");
+        priceText.setStyle("-fx-font-size: 11px; -fx-fill: #6c757d;");
 
         Text changeText = new Text("Change: " + String.format("%.2f", sug.percentChange) + "%");
         String color = sug.percentChange >= 0 ? "#28a745" : "#dc3545";
-        changeText.setStyle("-fx-font-size: 12px; -fx-fill: " + color + ";");
+        changeText.setStyle("-fx-font-size: 11px; -fx-fill: " + color + ";");
 
+        // ✅ Chart Configuration
         NumberAxis xAxis = new NumberAxis();
         NumberAxis yAxis = new NumberAxis();
-        xAxis.setVisible(false);
-        yAxis.setVisible(false);
+
+        // Smaller tick label font
+        Font tickFont = Font.font(Font.getDefault().getFamily(), 7);
+        xAxis.setTickLabelFont(tickFont);
+        yAxis.setTickLabelFont(tickFont);
+
+        // Axis labels
+        xAxis.setLabel("Time");
+        yAxis.setLabel("Price (₹)");
+
+        // ✅ Style axis labels via CSS
+        xAxis.setStyle("-fx-font-size: 9px;");
+        yAxis.setStyle("-fx-font-size: 9px;");
 
         LineChart<Number, Number> chart = new LineChart<>(xAxis, yAxis);
-        chart.setPrefWidth(180);
-        chart.setPrefHeight(60);
+        chart.setPrefWidth(420);  // ✅ Wider chart
+        chart.setPrefHeight(170); // ✅ Taller chart
         chart.setLegendVisible(false);
         chart.setCreateSymbols(false);
         chart.setAnimated(false);
@@ -115,23 +128,21 @@ public class InvestmentController implements Initializable {
 
                 container.getChildren().addAll(nameText, priceText, changeText, chart);
             } else {
-                // If no prices, display data in a TextArea
                 TextArea dataArea = new TextArea("No historical data available.");
-                dataArea.setPrefWidth(180);
-                dataArea.setPrefHeight(60);
+                dataArea.setPrefWidth(300);
+                dataArea.setPrefHeight(90);
                 dataArea.setEditable(false);
                 dataArea.setStyle("-fx-control-inner-background: #f8f9fa; -fx-font-size: 10px;");
                 container.getChildren().addAll(nameText, priceText, changeText, dataArea);
             }
         } catch (Exception e) {
-            // If chart fails, display prices in TextArea
             StringBuilder data = new StringBuilder("Historical Prices:\n");
             for (int i = 0; i < prices.size(); i++) {
                 data.append(String.format("Day %d: %.2f\n", i + 1, prices.get(i)));
             }
             TextArea dataArea = new TextArea(data.toString());
-            dataArea.setPrefWidth(180);
-            dataArea.setPrefHeight(60);
+            dataArea.setPrefWidth(300);
+            dataArea.setPrefHeight(90);
             dataArea.setEditable(false);
             dataArea.setStyle("-fx-control-inner-background: #f8f9fa; -fx-font-size: 10px;");
             container.getChildren().addAll(nameText, priceText, changeText, dataArea);
@@ -139,6 +150,4 @@ public class InvestmentController implements Initializable {
 
         return container;
     }
-
-
 }

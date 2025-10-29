@@ -2,88 +2,184 @@ package com.smartfinance.service;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.List;
-import java.util.Map;
-
 import java.nio.channels.UnresolvedAddressException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 public class APIClient {
-    private static final String BASE_URL = "https://stock.indianapi.in";
-    private static final String API_KEY = "sk-live-Izif4SjUfYWDjviQKV1f9PdzbqSwwfzdiyQplGFT"; // User's API key
-    private static final String ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
-    private static final String ALPHA_VANTAGE_API_KEY = System.getenv("ALPHA_VANTAGE_API_KEY");
+    private static final String BASE_URL = "https://yfapi.net";
+    private static final String API_KEY = "ppByrs2xVz4DoG2eoSmWq4b3fKo0ir709mHRpRuv";
+    private static final int TIMEOUT_SECONDS = 30;
 
     private final HttpClient httpClient;
 
     public APIClient() {
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
     }
+
+    // ======== Yahoo Finance API Methods (yfapi.net) ========
+
+    /**
+     * Fetches stock chart data from yfapi.net
+     * @param symbol Stock symbol (e.g., "RELIANCE.NS")
+     * @param range Time range (e.g., "1mo", "3mo", "1y")
+     * @param interval Data interval (e.g., "1d", "1wk")
+     * @return JSON response as String
+     */
+    public String getYahooFinanceData(String symbol, String range, String interval)
+            throws IOException, InterruptedException {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("Symbol cannot be null or empty");
+        }
+
+        String encodedSymbol = URLEncoder.encode(symbol.trim(), StandardCharsets.UTF_8);
+        String endpoint = String.format("/v8/finance/chart/%s?range=%s&interval=%s",
+                encodedSymbol, range, interval);
+
+        return sendRequest(endpoint);
+    }
+
+    /**
+     * Fetches real-time quote for a stock symbol
+     * @param symbol Stock symbol
+     * @return JSON response as String
+     */
+    public String getYahooQuote(String symbol) throws IOException, InterruptedException {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("Symbol cannot be null or empty");
+        }
+
+        String encodedSymbol = URLEncoder.encode(symbol.trim(), StandardCharsets.UTF_8);
+        String endpoint = String.format("/v6/finance/quote?symbols=%s", encodedSymbol);
+
+        return sendRequest(endpoint);
+    }
+
+    /**
+     * Fetches market summary data
+     * @return JSON response as String
+     */
+    public String getMarketSummary() throws IOException, InterruptedException {
+        return sendRequest("/v6/finance/quote/marketSummary");
+    }
+
+    /**
+     * Fetches trending stocks for a region
+     * @param region Region code (e.g., "US", "IN")
+     * @return JSON response as String
+     */
+    public String getTrendingStocks(String region) throws IOException, InterruptedException {
+        String endpoint = String.format("/v1/finance/trending/%s", region);
+        return sendRequest(endpoint);
+    }
+
+    /**
+     * Fetches multiple stock quotes in one request
+     * @param symbols Array of stock symbols
+     * @return JSON response as String
+     */
+    public String getMultipleQuotes(String[] symbols) throws IOException, InterruptedException {
+        if (symbols == null || symbols.length == 0) {
+            throw new IllegalArgumentException("At least one symbol is required");
+        }
+
+        String symbolsParam = String.join(",", symbols);
+        String encodedSymbols = URLEncoder.encode(symbolsParam, StandardCharsets.UTF_8);
+        String endpoint = String.format("/v6/finance/quote?symbols=%s", encodedSymbols);
+
+        return sendRequest(endpoint);
+    }
+
+    /**
+     * Fetches stock statistics (PE ratio, market cap, etc.)
+     * @param symbol Stock symbol
+     * @return JSON response as String
+     */
+    public String getStockStatistics(String symbol) throws IOException, InterruptedException {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("Symbol cannot be null or empty");
+        }
+
+        String encodedSymbol = URLEncoder.encode(symbol.trim(), StandardCharsets.UTF_8);
+        String endpoint = String.format("/v11/finance/quoteSummary/%s?modules=defaultKeyStatistics,financialData",
+                encodedSymbol);
+
+        return sendRequest(endpoint);
+    }
+
+    // ======== Shared Utility Methods ========
 
     private HttpRequest buildRequest(String endpoint) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + endpoint))
                 .header("x-api-key", API_KEY)
+                .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                .GET()
                 .build();
     }
 
-    private HttpRequest buildAlphaVantageRequest(String function) {
-        String url = ALPHA_VANTAGE_BASE_URL + "?function=" + function;
-        if (ALPHA_VANTAGE_API_KEY != null && !ALPHA_VANTAGE_API_KEY.isEmpty()) {
-            url += "&apikey=" + ALPHA_VANTAGE_API_KEY;
+    private String executeRequest(HttpRequest request) throws IOException, InterruptedException {
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            int statusCode = response.statusCode();
+
+            if (statusCode >= 200 && statusCode < 300) {
+                return response.body();
+            } else if (statusCode == 401 || statusCode == 403) {
+                throw new IOException("Authentication failed. Please check your API key.");
+            } else if (statusCode == 404) {
+                throw new IOException("Symbol not found or endpoint does not exist: " + request.uri());
+            } else if (statusCode == 429) {
+                throw new IOException("Rate limit exceeded. Please try again later or upgrade your API plan.");
+            } else if (statusCode >= 500) {
+                throw new IOException("yfapi.net service error (status " + statusCode + "). Please try again later.");
+            } else {
+                throw new IOException("API call failed with status " + statusCode + ": " + response.body());
+            }
+        } catch (UnresolvedAddressException ex) {
+            throw new IOException("Unable to resolve host 'yfapi.net'. Please check your internet connection.", ex);
+        } catch (java.net.http.HttpTimeoutException ex) {
+            throw new IOException("Request timed out after " + TIMEOUT_SECONDS + " seconds. The API may be slow or unavailable.", ex);
+        } catch (java.net.ConnectException ex) {
+            throw new IOException("Failed to connect to yfapi.net. Please check your internet connection.", ex);
         }
-        return HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .build();
     }
 
     private String sendRequest(String endpoint) throws IOException, InterruptedException {
-        HttpRequest request = buildRequest(endpoint);
+        return executeRequest(buildRequest(endpoint));
+    }
+
+    /**
+     * Test connection to yfapi.net API
+     * @return true if connection is successful and API key is valid
+     */
+    public boolean testConnection() {
         try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                return response.body();
-            }
-            throw new IOException("API call to " + endpoint + " failed with status " + response.statusCode());
-        } catch (UnresolvedAddressException ex) {
-            throw new IOException("Unable to resolve host '" + BASE_URL + "'. Check network connectivity or the configured API URL.", ex);
+            System.out.println("Testing connection to yfapi.net...");
+            getMarketSummary();
+            System.out.println("✓ Connection successful!");
+            return true;
+        } catch (Exception e) {
+            System.err.println("✗ Connection test failed: " + e.getMessage());
+            return false;
         }
     }
 
-    private String sendAlphaVantageRequest(String function) throws IOException, InterruptedException {
-        if (ALPHA_VANTAGE_API_KEY == null || ALPHA_VANTAGE_API_KEY.isBlank()) {
-            throw new IOException("Alpha Vantage API key not configured. Set ALPHA_VANTAGE_API_KEY environment variable.");
-        }
-        HttpRequest request = buildAlphaVantageRequest(function);
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 200 && response.statusCode() < 300) {
-            return response.body();
-        }
-        throw new IOException("Alpha Vantage call to function " + function + " failed with status " + response.statusCode());
-    }
-
-    public String getAlphaVantageTopGainersLosers() throws IOException, InterruptedException {
-        return sendAlphaVantageRequest("TOP_GAINERS_LOSERS");
-    }
-
-    public String getTrendingStocks() throws IOException, InterruptedException {
-        return sendRequest("/trending");
-    }
-
-    public String getNSEMostActive() throws IOException, InterruptedException {
-        return sendRequest("/NSE_most_active");
-    }
-
-    public String getStockDetails(String symbol) throws IOException, InterruptedException {
-        return sendRequest("/stock?symbol=" + symbol);
-    }
-
-    public String getHistoricalData(String symbol, String period) throws IOException, InterruptedException {
-        // Assuming period like "1M", "3M", etc.
-        return sendRequest("/historical_data?symbol=" + symbol + "&period=" + period);
+    /**
+     * Get API usage information (if supported by yfapi.net)
+     * @return JSON response with usage stats
+     */
+    public String getApiUsage() throws IOException, InterruptedException {
+        return sendRequest("/usage");
     }
 }

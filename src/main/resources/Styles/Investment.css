@@ -93,6 +93,9 @@
 .recommendations_vbox .vbox {
     -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.1), 4, 0, 0, 2);
     -fx-transition: all 0.2s ease-in-out;
+    -fx-padding: 20;
+    -fx-spacing: 16;
+    -fx-min-height: 180;
 }
 
 .recommendations_vbox .vbox:hover {
